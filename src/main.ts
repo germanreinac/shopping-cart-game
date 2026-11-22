@@ -274,19 +274,26 @@ async function start(): Promise<void> {
     // sits closer and lower, and the view is narrowed to keep the same width of world in frame.
     const short = Math.max(0, Math.min(1, (620 - window.innerHeight) / 240));
     const close = 1 - short * 0.3;
-    // The camera is locked to a fixed distance behind the rider. It used to chase its
-    // target, which let the rider run away from it at speed; now only the direction it
-    // looks from (heading) and its height are smoothed, so the rider stays the same size.
-    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 0.5) * close);
-    const goalY = focus.y + 1.5 - short * 0.25;
+    // A leash, not a lock: the camera eases after the rider so speed is felt as them pulling
+    // away a little, but the leash is short, so they never get small. It also rides higher
+    // and looks further up the road, which opens the view for steering.
+    const back = (3.5 + speedK * 0.9) * close;
+    const leash = back + 1.3 * close;
+    camGoal.copy(focus).addScaledVector(heading, -back);
+    const goalY = focus.y + 1.95 - short * 0.2;
     if (!camReady) {
+      camera.position.copy(camGoal);
       camY = goalY;
       camReady = true;
     }
     camY += (goalY - camY) * Math.min(1, dt * 9);
-    camera.position.set(camGoal.x, camY, camGoal.z);
-    lookAt.copy(focus).addScaledVector(heading, 2.2);
-    lookAt.y = focus.y + 0.65;
+    camera.position.lerp(camGoal, Math.min(1, dt * 9));
+    v.set(camera.position.x - focus.x, 0, camera.position.z - focus.z);
+    const gap = v.length();
+    if (gap > leash) camera.position.set(focus.x + (v.x / gap) * leash, 0, focus.z + (v.z / gap) * leash);
+    camera.position.y = camY;
+    lookAt.copy(focus).addScaledVector(heading, 4.5);
+    lookAt.y = focus.y + 0.75;
 
     shake = Math.max(0, shake - dt * 1.4);
     const s = shake * shake;
@@ -296,8 +303,9 @@ async function start(): Promise<void> {
     camRoll += (-(cart?.lean ?? 0) * 0.07 * speedK - camRoll) * Math.min(1, dt * 4);
     camera.rotateZ(camRoll + (Math.random() - 0.5) * s * 0.15);
     fovKick = Math.max(0, fovKick - dt * 14);
-    const wide = Math.max(1, camera.aspect / 1.6);
-    const base = 62 + speedK * (10 - short * 5) + fovKick;
+    // Wide screens get a narrower vertical angle, but only partly, so the view stays open.
+    const wide = Math.sqrt(Math.max(1, camera.aspect / 1.6));
+    const base = 70 + speedK * 12 + fovKick;
     const fov = (2 * Math.atan(Math.tan((base * Math.PI) / 360) / wide) * 180) / Math.PI;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 6);
