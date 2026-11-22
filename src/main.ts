@@ -91,6 +91,7 @@ async function start(): Promise<void> {
   const v = new THREE.Vector3();
   const coneUp = new THREE.Vector3();
   let camReady = false;
+  let camY = 0;
   let gapFrom: number | null = null;
 
   const award = (label: string, points: number) => {
@@ -251,13 +252,17 @@ async function start(): Promise<void> {
     // sits closer and lower, and the view is narrowed to keep the same width of world in frame.
     const short = Math.max(0, Math.min(1, (620 - window.innerHeight) / 240));
     const close = 1 - short * 0.2;
-    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 2.2) * close);
-    camGoal.y = focus.y + 1.5 - short * 0.25;
+    // The camera is locked to a fixed distance behind the rider. It used to chase its
+    // target, which let the rider run away from it at speed; now only the direction it
+    // looks from (heading) and its height are smoothed, so the rider stays the same size.
+    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 0.5) * close);
+    const goalY = focus.y + 1.5 - short * 0.25;
     if (!camReady) {
-      camera.position.copy(camGoal);
+      camY = goalY;
       camReady = true;
     }
-    camera.position.lerp(camGoal, Math.min(1, dt * 6));
+    camY += (goalY - camY) * Math.min(1, dt * 9);
+    camera.position.set(camGoal.x, camY, camGoal.z);
     lookAt.copy(focus).addScaledVector(heading, 2.2);
     lookAt.y = focus.y + 0.65;
 
@@ -270,7 +275,7 @@ async function start(): Promise<void> {
     camera.rotateZ(camRoll + (Math.random() - 0.5) * s * 0.15);
     fovKick = Math.max(0, fovKick - dt * 14);
     const wide = Math.max(1, camera.aspect / 1.6);
-    const base = 62 + speedK * (20 - short * 8) + fovKick;
+    const base = 62 + speedK * (10 - short * 5) + fovKick;
     const fov = (2 * Math.atan(Math.tan((base * Math.PI) / 360) / wide) * 180) / Math.PI;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 6);
