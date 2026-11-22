@@ -10,7 +10,7 @@ export interface Palette {
 }
 
 /** push: running behind a cart. ride: standing on its back. sit: in the basket. idle: hanging around. */
-export type Pose = 'push' | 'ride' | 'sit' | 'idle';
+export type Pose = 'push' | 'ride' | 'sit' | 'idle' | 'run';
 
 interface RagdollPart {
   body: RAPIER.RigidBody;
@@ -18,7 +18,7 @@ interface RagdollPart {
 }
 
 // Where the feet go, in the cart's local space, for each cart pose.
-const SEAT: Record<Exclude<Pose, 'idle'>, [number, number]> = {
+const SEAT: Record<Exclude<Pose, 'idle' | 'run'>, [number, number]> = {
   push: [-0.26, -0.95],
   ride: [-0.04, -0.47],
   sit: [-0.56, -0.14],
@@ -126,7 +126,7 @@ export class Person {
     let legR = 0;
     let roll = 0;
 
-    if (this.pose !== 'idle') {
+    if (this.pose !== 'idle' && this.pose !== 'run') {
       const [y, z] = SEAT[this.pose];
       this.root.position.y = lerp(this.root.position.y, y);
       this.root.position.z = lerp(this.root.position.z, z);
@@ -141,6 +141,16 @@ export class Person {
       legL = Math.sin(this.stride) * Math.min(1, Math.abs(this.speed) * 0.16);
       legR = -legL;
       roll = this.lean * 0.08;
+    } else if (this.pose === 'run') {
+      // On foot with no cart: arms pump opposite the legs.
+      const effort = Math.min(1, Math.abs(this.speed) / 8);
+      torsoLean = 0.08 + effort * 0.3;
+      this.stride += dt * (3 + Math.abs(this.speed) * 1.9);
+      legL = Math.sin(this.stride) * effort;
+      legR = -legL;
+      armL = -legL * 0.9;
+      armR = legL * 0.9;
+      roll = this.lean * 0.12;
     } else if (this.pose === 'ride') {
       // Counter the cart's pitch a little so a wheelie reads as leaning back.
       torsoLean = 0.25 - this.pitch * 0.5 + Math.min(0.25, Math.abs(this.speed) * 0.015);

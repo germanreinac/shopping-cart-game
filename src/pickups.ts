@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { toon, outline } from './style';
-import type { Cart } from './cart';
+import type { Player } from './player';
 
 const RESPAWN = 22;
 const REACH = 1.9;
@@ -31,9 +31,10 @@ export class Pickups {
   }
 
   /** Returns how many packs were collected this frame. */
-  update(dt: number, time: number, cart: Cart): number {
+  update(dt: number, time: number, player: Player): number {
     let collected = 0;
-    const p = cart.group.position;
+    const p = player.position;
+    const down = player.cart?.state === 'crashed';
     for (const pack of this.packs) {
       if (pack.cooldown > 0) {
         pack.cooldown -= dt;
@@ -42,8 +43,8 @@ export class Pickups {
       }
       pack.group.rotation.y = time * 2;
       pack.group.position.y = pack.home.y + Math.sin(time * 2.4 + pack.home.x) * 0.12;
-      if (cart.state !== 'crashed' && Math.hypot(p.x - pack.home.x, p.y + 0.5 - pack.home.y, p.z - pack.home.z) < REACH) {
-        cart.addStamina(REFILL);
+      if (!down && Math.hypot(p.x - pack.home.x, p.y + 0.5 - pack.home.y, p.z - pack.home.z) < REACH) {
+        player.addCigarettes(REFILL);
         pack.cooldown = RESPAWN;
         pack.group.visible = false;
         collected++;

@@ -18,6 +18,9 @@ export interface HudState {
   place: number;
   racers: number;
   best: number | null;
+  onFoot: boolean;
+  /** Which way the racing line bends ahead, in radians (positive = left). */
+  turn: number;
 }
 
 const fmt = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
@@ -33,6 +36,7 @@ export class Hud {
   private raceEl = document.getElementById('race')!;
   private staminaEl = document.getElementById('stamina')!;
   private throwBtn = document.getElementById('btn-throw');
+  private arrowEl = document.getElementById('arrow')!;
   private cigs: HTMLElement[] = [];
   private cache: Record<string, string> = {};
 
@@ -74,11 +78,23 @@ export class Hud {
     }
     this.set('race', this.raceEl, race, true);
 
+    // Race arrow: points where the racing line goes next, and swells for sharp corners.
+    const racing = h.race === 'running' || h.race === 'countdown';
+    const sharp = Math.min(1, Math.abs(h.turn) / 1.2);
+    const arrow = racing ? `rotate(${Math.round((-h.turn * 180) / Math.PI / 3) * 3}deg) scale(${(1 + sharp * 0.6).toFixed(1)})` : '';
+    if (this.cache.arrow !== arrow) {
+      this.arrowEl.style.display = racing ? 'block' : 'none';
+      this.arrowEl.style.transform = arrow;
+      this.arrowEl.style.color = sharp > 0.45 ? '#ffd166' : '#58ffd0';
+      this.cache.arrow = arrow;
+    }
+
     let hint: string;
-    if (h.state === 'crashed') hint = 'Ouch';
-    else hint = 'Hold <b>W</b> to go · <b>A / D</b> steer, hold a hard turn to drift and let go for a boost · <b>Space</b> jump (hold for higher) · <b>S</b> wheelie';
+    if (h.onFoot) hint = 'On foot: <b>W</b> run · <b>A / D</b> turn · run up behind any cart to grab it';
+    else if (h.state === 'crashed') hint = 'Ouch';
+    else hint = 'Hold <b>W</b> to go · <b>A / D</b> steer, hold to drift · <b>Space</b> jump · in the air <b>S</b> backflip, <b>A / D</b> spin · <b>Q</b> let go';
     if (h.passenger && h.state !== 'crashed') hint += ` · <b>F</b> ${h.passenger} throws`;
-    if (h.race === 'idle') hint += ' · <b>Enter</b> or the green ring to race';
+    if (h.race === 'idle' && !h.onFoot) hint += ' · <b>Enter</b> race';
     this.set('hint', this.hintEl, hint, true);
 
     if (this.throwBtn) {

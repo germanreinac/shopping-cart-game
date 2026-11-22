@@ -35,6 +35,9 @@
       .cig .left { display: block; height: 100%; background: #f4efe6; border-right: 3px solid #8d8d8d; box-sizing: border-box;
         border-radius: 0 2px 2px 0; transition: width 0.15s linear; }
       #stamina.burning .left { border-right-color: #ff5a1f; box-shadow: 3px 0 7px #ff5a1f; }
+      #arrow { position: absolute; top: 64px; left: 50%; margin-left: -24px; width: 48px; height: 48px; display: none;
+        font-size: 44px; line-height: 48px; text-align: center; font-weight: 900; color: #58ffd0; text-shadow: 0 2px 10px #000;
+        transition: transform 0.12s linear; }
       #hint { position: absolute; bottom: 20px; width: 100%; text-align: center; font-size: 14px; opacity: 0.85;
         text-shadow: 0 2px 6px #000; }
       #hint b { color: #ff9838; }
@@ -48,6 +51,7 @@
       #btn-hop { right: 128px; bottom: 70px; width: 72px; height: 72px; }
       #btn-reset { right: 22px; top: 76px; width: 46px; height: 46px; font-size: 18px; }
       #btn-race { right: 78px; top: 76px; width: 46px; height: 46px; font-size: 11px; }
+      #btn-letgo { right: 134px; top: 76px; width: 46px; height: 46px; font-size: 10px; }
       #btn-throw { right: 118px; bottom: 156px; width: 66px; height: 66px; display: none; }
       #touch.on ~ #hud #hint { display: none; }
     </style>
@@ -60,6 +64,7 @@
       <div id="btn-hop" class="tbtn">HOP</div>
       <div id="btn-reset" class="tbtn">↺</div>
       <div id="btn-race" class="tbtn">RACE</div>
+      <div id="btn-letgo" class="tbtn">LET GO</div>
       <div id="btn-throw" class="tbtn">THROW</div>
     </div>
     <div id="hud">
@@ -67,6 +72,7 @@
       <div id="speed-box" class="stat"><small>KM/H</small><span id="speed">0</span></div>
       <div id="stamina"></div>
       <div id="race"></div>
+      <div id="arrow">↑</div>
       <div id="pending"></div>
       <div id="popups"></div>
       <div id="hint"></div>

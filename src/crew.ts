@@ -16,6 +16,7 @@ export interface ThrowTarget {
 
 export type CrewEvent =
   | { type: 'joined'; name: string }
+  | { type: 'moved'; name: string }
   | { type: 'hit'; label: string; points: number };
 
 const PALETTES: Palette[] = [
@@ -47,6 +48,8 @@ interface Can {
  */
 export class Crew {
   passenger: Person | null = null;
+  /** The cart the passenger is sitting in. It may not be the one you are holding. */
+  passengerCart: Cart | null = null;
   passengerName = '';
   events: CrewEvent[] = [];
 
@@ -59,7 +62,6 @@ export class Crew {
   constructor(
     private scene: THREE.Scene,
     private world: RAPIER.World,
-    private cart: Cart,
     hangouts: { x: number; z: number; yaw: number }[],
   ) {
     hangouts.forEach((spot, i) => {
@@ -71,31 +73,42 @@ export class Crew {
     });
   }
 
+  /** True when the passenger is in the cart you are holding, so they can throw for you. */
+  ridingWith(cart: Cart | null): boolean {
+    return this.passenger !== null && cart !== null && this.passengerCart === cart;
+  }
+
   /** One physics step: pick up a passenger, throw, and check cans against their targets. */
-  step(wantThrow: boolean, targets: ThrowTarget[]): void {
+  step(cart: Cart | null, wantThrow: boolean, targets: ThrowTarget[]): void {
     const dt = FIXED_DT;
-    const cart = this.cart;
-    const pos = cart.body.translation();
     this.cooldown -= dt;
 
-    if (!this.passenger && cart.state !== 'crashed' && cart.speed < JOIN_MAX_SPEED && Math.abs(pos.y) < 1.5) {
-      const i = this.waiting.findIndex((w) => Math.hypot(w.x - pos.x, w.z - pos.z) < JOIN_RADIUS);
-      if (i >= 0) {
-        const [who] = this.waiting.splice(i, 1);
-        this.passenger = who.person;
-        this.passengerName = who.name;
-        who.person.pose = 'sit';
-        who.person.root.rotation.set(0, 0, 0);
-        who.person.root.position.set(0, -0.56, -0.14);
-        cart.group.add(who.person.root);
-        this.events.push({ type: 'joined', name: who.name });
+    if (cart && cart.state !== 'crashed') {
+      const pos = cart.body.translation();
+      if (!this.passenger && cart.speed < JOIN_MAX_SPEED && Math.abs(pos.y) < 1.5) {
+        const i = this.waiting.findIndex((w) => Math.hypot(w.x - pos.x, w.z - pos.z) < JOIN_RADIUS);
+        if (i >= 0) {
+          const [who] = this.waiting.splice(i, 1);
+          this.passenger = who.person;
+          this.passengerName = who.name;
+          who.person.pose = 'sit';
+          this.seat(cart);
+          this.events.push({ type: 'joined', name: who.name });
+        }
+      } else if (this.passenger && this.passengerCart && this.passengerCart !== cart && !this.passenger.ragdolled) {
+        // You let them roll off in another cart: pull up next to it and they climb across.
+        const other = this.passengerCart.body.translation();
+        if (this.passengerCart.speed < 4 && Math.hypot(other.x - pos.x, other.y - pos.y, other.z - pos.z) < 2.8) {
+          this.seat(cart);
+          this.events.push({ type: 'moved', name: this.passengerName });
+        }
       }
     }
 
-    if (wantThrow && this.passenger && !this.passenger.ragdolled && this.cooldown <= 0) {
+    if (wantThrow && cart && this.ridingWith(cart) && !this.passenger!.ragdolled && this.cooldown <= 0) {
       this.cooldown = THROW_COOLDOWN;
-      this.passenger.throwTime = 0.35;
-      this.throwCan(targets);
+      this.passenger!.throwTime = 0.35;
+      this.throwCan(cart, targets);
     }
 
     for (let i = this.cans.length - 1; i >= 0; i--) {
@@ -118,8 +131,14 @@ export class Crew {
     }
   }
 
-  private throwCan(targets: ThrowTarget[]): void {
-    const cart = this.cart;
+  private seat(cart: Cart): void {
+    this.passengerCart = cart;
+    this.passenger!.root.rotation.set(0, 0, 0);
+    this.passenger!.root.position.set(0, -0.56, -0.14);
+    cart.group.add(this.passenger!.root);
+  }
+
+  private throwCan(cart: Cart, targets: ThrowTarget[]): void {
     // Read the pose from physics, not the mesh, which is only synced once per rendered frame.
     const t = cart.body.translation();
     const r = cart.body.rotation();
@@ -170,19 +189,19 @@ export class Crew {
     this.cans.push({ body, mesh, life: 5, target: best });
   }
 
-  /** The cart went down: the passenger goes flying too. */
-  bail(velocity: THREE.Vector3): void {
-    this.passenger?.bail(velocity);
+  /** A cart went down: if the passenger was in it, they go flying too. */
+  bail(cart: Cart, velocity: THREE.Vector3): void {
+    if (cart === this.passengerCart) this.passenger?.bail(velocity);
   }
 
-  recover(): void {
-    this.passenger?.recover();
+  recover(cart: Cart): void {
+    if (cart === this.passengerCart) this.passenger?.recover();
   }
 
   update(dt: number, time: number): void {
     for (const w of this.waiting) w.person.update(dt, time);
     if (this.passenger) {
-      this.passenger.lean = this.cart.lean;
+      this.passenger.lean = this.passengerCart?.lean ?? 0;
       this.passenger.update(dt, time);
     }
     for (const can of this.cans) {

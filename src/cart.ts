@@ -1,9 +1,16 @@
 import * as THREE from 'three';
 import { toon } from './style';
 import { RAPIER, FIXED_DT, CART_GROUPS, WHEEL_RAY_GROUPS, groundBelow } from './physics';
-import type { Controls } from './input';
+import { NO_CONTROLS, type Controls } from './input';
 
-export type CartState = 'pushing' | 'riding' | 'crashed';
+/** loose: nobody is holding it, it just rolls. */
+export type CartState = 'pushing' | 'riding' | 'crashed' | 'loose';
+
+/** A grindable rail: a straight bar from a to b. */
+export interface Rail {
+  a: THREE.Vector3;
+  b: THREE.Vector3;
+}
 
 export type CartEvent =
   | { type: 'hopOn' }
@@ -48,6 +55,9 @@ export const TUNE = {
   airYawTorque: 150, // spinning in the air
   airYawDamping: 18,
   airLevel: 60, // how hard the rider keeps the cart level in the air
+  flipRate: 8, // rad/s of a held flip
+  grindMinSpeed: 4, // need this much speed along a rail to lock on
+  grindFriction: 0.6, // m/s² lost while grinding
   antiRoll: 900, // keeps all four wheels down in hard corners
   wheelieRaiseRate: 0.9, // rad/s the nose climbs while you hold back
   wheelieDropRate: 1.8, // rad/s it comes down when you let go
@@ -61,6 +71,8 @@ export const TUNE = {
   recoverTime: 1, // seconds on the floor before you are stood back up automatically
 };
 
+const PITCH_INERTIA = 9;
+const RAIL_SEAT = 0.14; // how high the cart's origin rides above a rail
 const YAW_INERTIA = 8; // matches the collider's mass properties below
 const WHEEL_RADIUS = 0.08;
 const SUSPENSION_REST = 0.12;
@@ -194,6 +206,12 @@ export class Cart {
   lean = 0;
   /** True while in a held slide. */
   drifting = false;
+  /** True while the player has hold of this cart. Otherwise it rolls on its own. */
+  occupied = false;
+  /** Rails this cart can grind. */
+  rails: Rail[] = [];
+  /** Set while sliding along a rail. */
+  grind: { rail: Rail; t: number; v: number; time: number; yaw: number; points: number } | null = null;
   grounded = 0;
   /** Points building up in the trick currently being held, and what it is. */
   pendingPoints = 0;
@@ -219,6 +237,9 @@ export class Cart {
   private driftTime = 0;
   private driftPoints = 0;
   private driftCharge = 0;
+  private airPitch = 0;
+  private flipArmed = false;
+  private grindCooldown = 0;
   private visualRoll = 0;
   private driftDir = 0;
   private jumpBuffer = 0;
@@ -236,6 +257,7 @@ export class Cart {
     spawn: { x: number; z: number; yaw: number },
     private kerbs: Set<number>,
     private bounds: { x: number; z: number },
+    accent = 0xd8342c,
   ) {
     this.spawnPose = spawn;
     const yawQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawn.yaw);
@@ -271,7 +293,7 @@ export class Cart {
       v.setWheelSideFrictionStiffness(i, 1);
     });
 
-    const mesh = buildCartMesh();
+    const mesh = buildCartMesh(accent);
     this.group = mesh.group;
     this.wheelMeshes = mesh.wheels;
     scene.add(this.group);
@@ -285,10 +307,19 @@ export class Cart {
     const m = b.mass();
     this.readPose();
 
+    if (!this.occupied) {
+      ctl = NO_CONTROLS;
+      if (this.state !== 'crashed') this.state = 'loose';
+    }
     if (ctl.reset) {
       this.reset();
       return;
     }
+    if (this.grind) {
+      this.grindStep(ctl);
+      return;
+    }
+    this.tryGrind();
 
     const onWheels = this.grounded >= 2;
     this.sprinting = false;
@@ -377,7 +408,16 @@ export class Cart {
         b.applyTorqueImpulse({ x: 0, y: YAW_INERTIA * (want - av.y) * Math.min(1, TUNE.turnSnap * dt), z: 0 }, true);
 
         // Anti-roll: not realistic, but it keeps hard corners fun instead of fatal.
-        const roll = -(side.y * TUNE.antiRoll + (av.x * fwd.x + av.y * fwd.y + av.z * fwd.z) * 120) * dt;
+        // Measured against the ground under the wheels, so banked corners can be ridden.
+        let nx = 0, ny = 0, nz = 0;
+        for (let i = 0; i < 4; i++) {
+          const n = this.vehicle.wheelIsInContact(i) ? this.vehicle.wheelContactNormal(i) : null;
+          if (n) { nx += n.x; ny += n.y; nz += n.z; }
+        }
+        const nLen = Math.hypot(nx, ny, nz) || 1;
+        const lean = (side.x * nx + side.y * ny + side.z * nz) / nLen;
+        this.flipArmed = false;
+        const roll = -(lean * TUNE.antiRoll + (av.x * fwd.x + av.y * fwd.y + av.z * fwd.z) * 120) * dt;
         b.applyTorqueImpulse({ x: fwd.x * roll, y: fwd.y * roll, z: fwd.z * roll }, true);
 
         // Grip: bleed off sideways speed and turn most of it back into forward speed, so the
@@ -397,12 +437,34 @@ export class Cart {
         if (this.drifting) this.endDrift(m, false);
         // In the air: spin freely, and keep the cart roughly level so jumps are landable.
         const spin = -ctl.steer * TUNE.airYawTorque - av.y * TUNE.airYawDamping;
-        tmp.set(-up.z, 0, up.x).multiplyScalar(TUNE.airLevel); // up × worldUp
-        b.applyTorqueImpulse(
-          { x: (tmp.x - av.x * 14) * dt, y: spin * dt, z: (tmp.z - av.z * 14) * dt },
-          true,
-        );
+        // Flips: hold back for a backflip; let go of push and press it again in the air for a frontflip.
+        const pitchRate = -(av.x * side.x + av.y * side.y + av.z * side.z);
+        let flip = 0;
+        if (this.state === 'riding' && this.grounded === 0) {
+          if (ctl.back > 0.3) flip = 1;
+          else if (this.flipArmed && ctl.push) flip = -1;
+          if (!ctl.push) this.flipArmed = true;
+        }
+        if (flip !== 0) {
+          const kick = -PITCH_INERTIA * (flip * TUNE.flipRate - pitchRate) * Math.min(1, 10 * dt);
+          b.applyTorqueImpulse({ x: side.x * kick, y: side.y * kick + spin * dt, z: side.z * kick }, true);
+        } else {
+          // Hands off: finish the rotation you started, or settle level if you barely began.
+          const angle = Math.atan2(fwd.y, up.y);
+          const want = Math.abs(angle) > 1 && Math.abs(pitchRate) > 2
+            ? Math.sign(pitchRate) * TUNE.flipRate
+            : Math.max(-TUNE.flipRate, Math.min(TUNE.flipRate, -7 * angle));
+          const settle = -PITCH_INERTIA * (want - pitchRate) * Math.min(1, 10 * dt);
+          // Roll is levelled separately, about the cart's own nose.
+          const rollRate = av.x * fwd.x + av.y * fwd.y + av.z * fwd.z;
+          const roll = (-side.y * TUNE.airLevel - rollRate * 14) * dt;
+          b.applyTorqueImpulse(
+            { x: side.x * settle + fwd.x * roll, y: side.y * settle + fwd.y * roll + spin * dt, z: side.z * settle + fwd.z * roll },
+            true,
+          );
+        }
         this.airYaw += av.y * dt;
+        this.airPitch += pitchRate * dt;
         // Snappier jumps: fall faster than you rise, and a tapped hop is a short hop.
         if (this.grounded === 0) {
           const extra = vel.y < 0 ? TUNE.fallGravity : this.hopping && !ctl.jumpHeld ? TUNE.hopCutGravity : 0;
@@ -426,6 +488,7 @@ export class Cart {
   postStep(): void {
     const dt = FIXED_DT;
     this.readPose();
+    if (this.grind) return;
 
     let touchingKerb = false;
     for (let i = 0; i < 4; i++) {
@@ -443,6 +506,12 @@ export class Cart {
       if (this.airTime > 0.3) {
         this.events.push({ type: 'land', strength: Math.min(1, this.airTime / 0.9) });
         if (this.state === 'riding' && up.y > 0.8) {
+          const flips = Math.round(Math.abs(this.airPitch) / (Math.PI * 2));
+          if (flips >= 1) {
+            const kind = this.airPitch > 0 ? 'BACKFLIP' : 'FRONTFLIP';
+            const count = ['', '', 'DOUBLE ', 'TRIPLE '][flips] ?? `${flips}x `;
+            this.events.push({ type: 'trick', label: count + kind, points: 400 * flips * (flips + 1) });
+          }
           const halfTurns = Math.round(Math.abs(this.airYaw) / Math.PI);
           if (halfTurns >= 1) {
             this.events.push({ type: 'trick', label: `${halfTurns * 180} SPIN`, points: 150 * halfTurns * (halfTurns + 1) });
@@ -457,6 +526,7 @@ export class Cart {
       if (this.airTime > 0) this.hopping = false;
       this.airTime = 0;
       this.airYaw = 0;
+      this.airPitch = 0;
       this.groundY = this.body.translation().y - 0.27;
       this.onKerb = touchingKerb;
     }
@@ -493,8 +563,14 @@ export class Cart {
       this.autoRecover();
     } else {
       const lost = Math.hypot(this.prevVel.x - vel.x, this.prevVel.z - vel.z);
-      const tipped = up.y < TUNE.tipCrashUp;
-      const looped = this.state === 'riding' && this.pitch > 1.15;
+      // Upside down only counts once you are back near the ground, so flips are allowed.
+      let tipped = false;
+      if (up.y < TUNE.tipCrashUp) {
+        const t = this.body.translation();
+        const floor = groundBelow(this.world, t.x, t.y + 0.5, t.z, 3);
+        tipped = this.grounded > 0 || (floor !== null && t.y - floor < 0.75);
+      }
+      const looped = this.state === 'riding' && this.grounded >= 1 && this.pitch > 1.15;
       if (tipped || looped || lost > TUNE.slamCrashDv) {
         this.state = 'crashed';
         this.crashTimer = 0;
@@ -570,6 +646,84 @@ export class Cart {
     else this.placeAt(this.spawnPose.x, 0, this.spawnPose.z, this.spawnPose.yaw);
   }
 
+  /** The player lets go: the cart rolls on by itself with whoever is in the basket. */
+  release(): void {
+    if (this.drifting) this.endDrift(this.body.mass(), false);
+    this.occupied = false;
+    this.grind = null;
+    if (this.state !== 'crashed') this.state = 'loose';
+    this.wheelieTarget = 0;
+    this.pendingPoints = 0;
+  }
+
+  /** The player takes hold of this cart. */
+  grab(): void {
+    this.occupied = true;
+    if (this.state !== 'crashed') this.state = 'pushing';
+  }
+
+  /** Lock onto a rail if the cart is dropping onto one with enough speed along it. */
+  private tryGrind(): void {
+    this.grindCooldown -= FIXED_DT;
+    if (this.state !== 'riding' || this.grounded !== 0 || vel.y > 1 || this.grindCooldown > 0) return;
+    const p = this.body.translation();
+    for (const rail of this.rails) {
+      const dx = rail.b.x - rail.a.x, dy = rail.b.y - rail.a.y, dz = rail.b.z - rail.a.z;
+      const len = Math.hypot(dx, dy, dz);
+      const ux = dx / len, uy = dy / len, uz = dz / len;
+      const t = (p.x - rail.a.x) * ux + (p.y - rail.a.y) * uy + (p.z - rail.a.z) * uz;
+      if (t < 0 || t > len) continue;
+      const cx = rail.a.x + ux * t, cy = rail.a.y + uy * t, cz = rail.a.z + uz * t;
+      const above = p.y - cy;
+      if (Math.hypot(p.x - cx, p.z - cz) > 0.7 || above < -0.1 || above > 0.8) continue;
+      const v = vel.x * ux + vel.y * uy + vel.z * uz;
+      if (Math.abs(v) < TUNE.grindMinSpeed) continue;
+      this.grind = { rail, t, v, time: 0, yaw: Math.atan2(fwd.x, fwd.z), points: 0 };
+      if (this.drifting) this.endDrift(this.body.mass(), false);
+      return;
+    }
+  }
+
+  /** Slide along the rail. Steer to spin on it, jump to hop off. */
+  private grindStep(ctl: Controls): void {
+    const dt = FIXED_DT;
+    const g = this.grind!;
+    const b = this.body;
+    const rail = g.rail;
+    const dx = rail.b.x - rail.a.x, dy = rail.b.y - rail.a.y, dz = rail.b.z - rail.a.z;
+    const len = Math.hypot(dx, dy, dz);
+    const ux = dx / len, uy = dy / len, uz = dz / len;
+
+    this.lean += (ctl.steer - this.lean) * Math.min(1, 9 * dt);
+    g.v -= Math.sign(g.v) * TUNE.grindFriction * dt;
+    g.t += g.v * dt;
+    g.time += dt;
+    g.yaw -= this.lean * 5 * dt;
+    g.points += dt * Math.abs(g.v) * 12;
+    this.pendingPoints = Math.round(g.points / 10) * 10;
+    this.pendingLabel = 'GRIND';
+
+    const off = g.t < 0 || g.t > len || Math.abs(g.v) < 1.5;
+    const hop = ctl.jump || this.jumpBuffer > 0;
+    const t = Math.max(0, Math.min(len, g.t));
+    b.setTranslation({ x: rail.a.x + ux * t, y: rail.a.y + uy * t + RAIL_SEAT, z: rail.a.z + uz * t }, true);
+    q.setFromAxisAngle(tmp.set(0, 1, 0), g.yaw);
+    b.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+    b.setAngvel({ x: 0, y: -this.lean * 5, z: 0 }, true);
+    b.setLinvel({ x: ux * g.v, y: uy * g.v + (hop ? TUNE.hopSpeed : 0), z: uz * g.v }, true);
+    this.prevVel.set(ux * g.v, uy * g.v, uz * g.v);
+
+    if (off || hop) {
+      if (g.time > 0.3) this.events.push({ type: 'trick', label: 'GRIND', points: this.pendingPoints });
+      this.grind = null;
+      this.grindCooldown = 0.35;
+      this.jumpBuffer = 0;
+      this.hopping = hop;
+      this.pendingPoints = 0;
+    }
+    this.vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
+  }
+
   addStamina(cigarettes: number): void {
     this.stamina = Math.min(TUNE.staminaMax, this.stamina + cigarettes);
   }
@@ -581,7 +735,8 @@ export class Cart {
     this.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
     this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    this.state = 'pushing';
+    this.state = this.occupied ? 'pushing' : 'loose';
+    this.grind = null;
     this.airTime = 0;
     this.groundY = groundY;
     this.lastYaw = yaw;
@@ -590,6 +745,7 @@ export class Cart {
   }
 
   private clearTrick(): void {
+    this.airPitch = 0;
     this.drifting = false;
     this.driftCharge = 0;
     this.driftTime = 0;

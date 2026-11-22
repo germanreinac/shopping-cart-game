@@ -16,9 +16,11 @@ export interface Controls {
   throw: boolean;
   /** Pressed this step: start (or abandon) a race. */
   race: boolean;
+  /** Pressed this step: let go of the cart. */
+  letGo: boolean;
 }
 
-export const NO_CONTROLS: Controls = { push: false, steer: 0, back: 0, jump: false, jumpHeld: false, reset: false, throw: false, race: false };
+export const NO_CONTROLS: Controls = { push: false, steer: 0, back: 0, jump: false, jumpHeld: false, reset: false, throw: false, race: false, letGo: false };
 
 const DEADZONE = 0.18;
 
@@ -28,6 +30,7 @@ export class Input {
   private resetQueued = false;
   private throwQueued = false;
   private raceQueued = false;
+  private letGoQueued = false;
   private padPrev: boolean[] = [];
   private touch = { push: false, steer: 0, back: 0, jump: false };
 
@@ -39,6 +42,7 @@ export class Input {
       if (e.code === 'KeyR') this.resetQueued = true;
       if (e.code === 'KeyF' || e.code === 'KeyE') this.throwQueued = true;
       if (e.code === 'Enter') this.raceQueued = true;
+      if (e.code === 'KeyQ') this.letGoQueued = true;
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -71,7 +75,9 @@ export class Input {
       reset: this.resetQueued,
       throw: this.throwQueued,
       race: this.raceQueued,
+      letGo: this.letGoQueued,
     };
+    this.letGoQueued = false;
     this.jumpQueued = false;
     this.resetQueued = false;
     this.throwQueued = false;
@@ -88,6 +94,7 @@ export class Input {
     const edge = (i: number) => pressed[i] && !this.padPrev[i];
     if (edge(0)) this.jumpQueued = true;
     if (edge(1) || edge(5)) this.throwQueued = true;
+    if (edge(4)) this.letGoQueued = true;
     if (edge(3)) this.resetQueued = true;
     if (edge(9)) this.raceQueued = true;
     this.padPrev = pressed;
@@ -152,5 +159,6 @@ export class Input {
     hold('btn-reset', () => (this.resetQueued = true));
     hold('btn-throw', () => (this.throwQueued = true));
     hold('btn-race', () => (this.raceQueued = true));
+    hold('btn-letgo', () => (this.letGoQueued = true));
   }
 }

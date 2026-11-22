@@ -1,8 +1,18 @@
 import * as THREE from 'three';
 import { RAPIER, FIXED_DT, RIVAL_GROUPS, groundBelow } from './physics';
-import { buildCartMesh, type Cart } from './cart';
+import { buildCartMesh } from './cart';
 import { Person, type Palette } from './person';
 import type { ThrowTarget } from './crew';
+
+/** What the race needs to know about the player. */
+export interface Racer {
+  readonly position: THREE.Vector3;
+  readonly speed: number;
+  readonly yaw: number;
+  readonly crashed: boolean;
+  placeAt(x: number, y: number, z: number, yaw: number): void;
+  addCigarettes(n: number): void;
+}
 
 export type RaceState = 'idle' | 'countdown' | 'running' | 'finished';
 
@@ -10,6 +20,7 @@ export type RaceEvent =
   | { type: 'count'; text: string }
   | { type: 'lap'; lap: number; laps: number }
   | { type: 'shove'; name: string }
+  | { type: 'offCourse' }
   | { type: 'finish'; place: number; racers: number; time: number; best: boolean };
 
 const LAPS = 2;
@@ -20,7 +31,7 @@ const STUN_TIME = 2.6;
 const SHOVE_STUN = 1.1;
 const SHOVE_REACH = 1.15;
 const BEST_KEY = 'shopping-cart-game.bestRace';
-const START_PAD = { x: 7, z: 60, radius: 2.6 };
+const START_PAD = { x: -7, z: 58, radius: 2.6 };
 
 // Each kid has a different pace and a lane they like. Lanes are metres left/right of the racing line.
 const RIVALS: { name: string; speed: number; offset: number; accent: number; palette: Palette }[] = [
@@ -173,6 +184,7 @@ export class Race {
   private checkpoints: THREE.Vector3[] = [];
   private marker: THREE.Group;
   private pad: THREE.Mesh;
+  private arrows: THREE.InstancedMesh;
   private padArmed = false;
   private timer = 0;
   private finishedRivals = 0;
@@ -180,8 +192,9 @@ export class Race {
   private startYaw: number;
   /** How far round the circuit the player is, in metres since the start. */
   private playerS = 0;
+  private lostTime = 0;
 
-  constructor(scene: THREE.Scene, world: RAPIER.World, private cart: Cart, circuit: THREE.Vector3[]) {
+  constructor(scene: THREE.Scene, world: RAPIER.World, private racer: Racer, circuit: THREE.Vector3[]) {
     this.curve = new THREE.CatmullRomCurve3(circuit, true, 'centripetal');
     this.curve.arcLengthDivisions = 600;
     this.length = this.curve.getLength();
@@ -203,6 +216,35 @@ export class Race {
     this.marker.add(beam, ring);
     this.marker.visible = false;
     scene.add(this.marker);
+
+    // Chevrons painted along the racing line while a race is on, so corners can be read early.
+    const chevron = new THREE.Shape();
+    chevron.moveTo(0, 0.9);
+    chevron.lineTo(1.1, -0.5);
+    chevron.lineTo(0.65, -0.5);
+    chevron.lineTo(0, 0.3);
+    chevron.lineTo(-0.65, -0.5);
+    chevron.lineTo(-1.1, -0.5);
+    chevron.closePath();
+    const count = Math.floor(this.length / 7);
+    this.arrows = new THREE.InstancedMesh(
+      new THREE.ShapeGeometry(chevron).rotateX(Math.PI / 2),
+      new THREE.MeshBasicMaterial({ color: 0x58ffd0, transparent: true, opacity: 0.55, depthWrite: false, side: THREE.DoubleSide }),
+      count,
+    );
+    const m = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const one = new THREE.Vector3(1, 1, 1);
+    const fwdAxis = new THREE.Vector3(0, 0, 1);
+    for (let i = 0; i < count; i++) {
+      const u = i / count;
+      const pt = this.curve.getPointAt(u);
+      pt.y += 0.09;
+      quat.setFromUnitVectors(fwdAxis, this.curve.getTangentAt(u));
+      this.arrows.setMatrixAt(i, m.compose(pt, quat, one));
+    }
+    this.arrows.visible = false;
+    scene.add(this.arrows);
 
     // Start pad: roll into it to line everyone up for a race.
     this.pad = new THREE.Mesh(
@@ -265,8 +307,8 @@ export class Race {
       return;
     }
     const start = this.curve.getPointAt(0);
-    this.cart.placeAt(start.x, start.y, start.z, this.startYaw);
-    this.cart.addStamina(99); // everyone starts a race with a full pack
+    this.racer.placeAt(start.x, start.y, start.z, this.startYaw);
+    this.racer.addCigarettes(99); // everyone starts a race with a full pack
     // Two rows on the grid: the player is in the middle of the front row.
     this.rivals.forEach((r, i) => r.placeAt(i < 2 ? 0 : -3.5));
     this.state = 'countdown';
@@ -274,6 +316,7 @@ export class Race {
     this.time = 0;
     this.next = 0;
     this.playerS = 0;
+    this.lostTime = 0;
     this.finishedRivals = 0;
     this.padArmed = false;
     this.moveMarker();
@@ -282,13 +325,13 @@ export class Race {
 
   step(): void {
     const dt = FIXED_DT;
-    const p = this.cart.body.translation();
+    const p = this.racer.position;
 
     if (this.state === 'idle') {
       // The pad only arms once you have rolled out of it, so a race does not restart under you.
       const onPad = Math.hypot(p.x - START_PAD.x, p.z - START_PAD.z) < START_PAD.radius && Math.abs(p.y) < 1.5;
       if (!onPad) this.padArmed = true;
-      else if (this.padArmed && this.cart.state !== 'crashed') this.toggle();
+      else if (this.padArmed && !this.racer.crashed) this.toggle();
     } else if (this.state === 'countdown') {
       const before = Math.ceil(this.timer);
       this.timer -= dt;
@@ -298,7 +341,19 @@ export class Race {
     }
 
     const racing = this.state === 'running' || this.state === 'finished';
-    if (this.state === 'running') this.trackPlayer(p);
+    if (this.state === 'running') {
+      this.trackPlayer(p);
+      // Missed a turn or took the wrong level: after a few seconds, put the player back on the line.
+      const on = this.at(this.playerS);
+      const lost = Math.hypot(on.x - p.x, on.z - p.z) > 24 || Math.abs(on.y - p.y) > 3.2;
+      this.lostTime = lost && !this.racer.crashed ? this.lostTime + dt : 0;
+      if (this.lostTime > 2.5) {
+        const tangent = this.curve.getTangentAt((((this.playerS % this.length) + this.length) % this.length) / this.length);
+        this.racer.placeAt(on.x, on.y, on.z, Math.atan2(tangent.x, tangent.z));
+        this.lostTime = 0;
+        this.events.push({ type: 'offCourse' });
+      }
+    }
     for (const r of this.rivals) {
       let pace = this.state === 'countdown' ? 0 : racing && !r.finished ? 1 : CRUISE;
       if (this.state === 'running' && !r.finished) {
@@ -312,7 +367,7 @@ export class Race {
         if (this.state === 'running') this.finishedRivals++;
       }
       // Barge into a kid and they get knocked off line instead of you both going down.
-      if (this.state !== 'countdown' && this.cart.state !== 'crashed' && this.cart.speed > 4 &&
+      if (this.state !== 'countdown' && !this.racer.crashed && this.racer.speed > 4 &&
         Math.hypot(p.x - r.position.x, p.y - r.position.y, p.z - r.position.z) < SHOVE_REACH && r.shove(p.x, p.z)) {
         this.events.push({ type: 'shove', name: r.name });
       }
@@ -353,12 +408,13 @@ export class Race {
     for (const r of this.rivals) r.update(dt, time);
     if (this.marker.visible) this.marker.children[0].rotation.y = time;
     this.pad.visible = this.state === 'idle';
+    this.arrows.visible = this.state === 'countdown' || this.state === 'running';
     this.pad.rotation.y = time * 0.6;
   }
 
   /** Slide the player's marker forward along the racing line to the point nearest the cart. */
   private trackPlayer(p: { x: number; y: number; z: number }): void {
-    const at = (s: number) => this.curve.getPointAt((((s % this.length) + this.length) % this.length) / this.length);
+    const at = (s: number) => this.at(s);
     let here = at(this.playerS);
     let best = Math.hypot(here.x - p.x, here.y - p.y, here.z - p.z);
     for (let i = 0; i < 12; i++) {
@@ -368,6 +424,23 @@ export class Race {
       best = d;
       this.playerS += 1;
     }
+  }
+
+  /**
+   * Which way the racing line bends just ahead, relative to where the player is pointing.
+   * Radians: positive = it goes left, negative = right. Drives the arrow on the HUD.
+   */
+  get turn(): number {
+    const ahead = this.at(this.playerS + 16 + this.racer.speed * 1.1);
+    const p = this.racer.position;
+    let diff = Math.atan2(ahead.x - p.x, ahead.z - p.z) - this.racer.yaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    return diff;
+  }
+
+  private at(s: number): THREE.Vector3 {
+    return this.curve.getPointAt((((s % this.length) + this.length) % this.length) / this.length);
   }
 
   private moveMarker(): void {
