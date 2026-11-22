@@ -34,3 +34,10 @@ export function addStaticBox(
     .setFriction(friction);
   return world.createCollider(desc);
 }
+
+/** Height of the fixed ground under a point, or null if nothing is within `maxDist` below it. */
+export function groundBelow(world: RAPIER.World, x: number, y: number, z: number, maxDist = 6): number | null {
+  const ray = new RAPIER.Ray({ x, y, z }, { x: 0, y: -1, z: 0 });
+  const hit = world.castRay(ray, maxDist, true, RAPIER.QueryFilterFlags.ONLY_FIXED);
+  return hit ? y - hit.timeOfImpact : null;
+}

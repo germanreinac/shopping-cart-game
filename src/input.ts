@@ -10,7 +10,13 @@ export interface Controls {
   jump: boolean;
   /** Pressed this step: reset after a bail. */
   reset: boolean;
+  /** Pressed this step: your passenger throws a can. */
+  throw: boolean;
+  /** Pressed this step: start (or abandon) a race. */
+  race: boolean;
 }
+
+export const NO_CONTROLS: Controls = { push: false, steer: 0, back: 0, jump: false, reset: false, throw: false, race: false };
 
 const DEADZONE = 0.18;
 
@@ -18,6 +24,8 @@ export class Input {
   private keys = new Set<string>();
   private jumpQueued = false;
   private resetQueued = false;
+  private throwQueued = false;
+  private raceQueued = false;
   private padPrev: boolean[] = [];
   private touch = { push: false, steer: 0, back: 0 };
 
@@ -27,6 +35,8 @@ export class Input {
       this.keys.add(e.code);
       if (e.code === 'Space') this.jumpQueued = true;
       if (e.code === 'KeyR') this.resetQueued = true;
+      if (e.code === 'KeyF' || e.code === 'KeyE') this.throwQueued = true;
+      if (e.code === 'Enter') this.raceQueued = true;
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -56,13 +66,17 @@ export class Input {
       back,
       jump: this.jumpQueued,
       reset: this.resetQueued,
+      throw: this.throwQueued,
+      race: this.raceQueued,
     };
     this.jumpQueued = false;
     this.resetQueued = false;
+    this.throwQueued = false;
+    this.raceQueued = false;
     return out;
   }
 
-  /** Standard-mapping gamepad: RT or X = push, stick = steer / lean back, A = hop, Y or Start = reset. */
+  /** Standard-mapping gamepad: RT or X = push, stick = steer / lean back, A = hop, B = throw, Y = reset, Start = race. */
   private readGamepad(): { push: boolean; steer: number; back: number } | null {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = Array.from(pads).find((p) => p && p.connected);
@@ -70,7 +84,9 @@ export class Input {
     const pressed = pad.buttons.map((b) => b.pressed || b.value > 0.4);
     const edge = (i: number) => pressed[i] && !this.padPrev[i];
     if (edge(0)) this.jumpQueued = true;
-    if (edge(3) || edge(9)) this.resetQueued = true;
+    if (edge(1) || edge(5)) this.throwQueued = true;
+    if (edge(3)) this.resetQueued = true;
+    if (edge(9)) this.raceQueued = true;
     this.padPrev = pressed;
     const ax = pad.axes[0] ?? 0;
     const ay = pad.axes[1] ?? 0;
@@ -130,5 +146,7 @@ export class Input {
     hold('btn-push', () => (this.touch.push = true), () => (this.touch.push = false));
     hold('btn-hop', () => (this.jumpQueued = true));
     hold('btn-reset', () => (this.resetQueued = true));
+    hold('btn-throw', () => (this.throwQueued = true));
+    hold('btn-race', () => (this.raceQueued = true));
   }
 }

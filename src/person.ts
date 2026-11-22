@@ -1,19 +1,42 @@
 import * as THREE from 'three';
 import { RAPIER, RAGDOLL_GROUPS } from './physics';
-import type { Cart } from './cart';
+
+export interface Palette {
+  top: number;
+  legs: number;
+  skin: number;
+  hat: number;
+}
+
+/** push: running behind a cart. ride: standing on its back. sit: in the basket. idle: hanging around. */
+export type Pose = 'push' | 'ride' | 'sit' | 'idle';
 
 interface RagdollPart {
   body: RAPIER.RigidBody;
   mesh: THREE.Mesh;
-  home: THREE.Object3D;
 }
 
+// Where the feet go, in the cart's local space, for each cart pose.
+const SEAT: Record<Exclude<Pose, 'idle'>, [number, number]> = {
+  push: [-0.26, -0.95],
+  ride: [-0.04, -0.47],
+  sit: [-0.56, -0.14],
+};
+
 /**
- * The teen. While pushing or riding it is just a posed model parented to the cart;
- * on a bail every body part becomes a physics box joined at shoulders, hips and neck.
+ * A blocky teen. Posed and animated while attached to something; on a bail every body
+ * part becomes a physics box joined at shoulders, hips and neck.
  */
-export class Rider {
-  private root = new THREE.Group();
+export class Person {
+  readonly root = new THREE.Group();
+  pose: Pose = 'idle';
+  /** Animation inputs, set by whoever owns this person. */
+  speed = 0;
+  lean = 0;
+  pitch = 0;
+  /** Set > 0 to play a throwing swing. */
+  throwTime = 0;
+
   private torsoPivot = new THREE.Group();
   private torso: THREE.Mesh;
   private head: THREE.Mesh;
@@ -21,28 +44,29 @@ export class Rider {
   private legs: THREE.Group[] = [];
   private limbMeshes: THREE.Mesh[] = [];
   private ragdoll: RagdollPart[] | null = null;
-  private stride = 0;
+  private stride = Math.random() * 6;
+  private ember: THREE.Mesh | null = null;
 
-  constructor(private scene: THREE.Scene, private world: RAPIER.World, private cart: Cart) {
-    const hoodie = new THREE.MeshStandardMaterial({ color: 0xc9453c, roughness: 0.8 });
-    const jeans = new THREE.MeshStandardMaterial({ color: 0x4a5f96, roughness: 0.85 });
-    const skin = new THREE.MeshStandardMaterial({ color: 0xe2ac8c, roughness: 0.7 });
+  constructor(private scene: THREE.Scene, private world: RAPIER.World, palette: Palette, smoker = false) {
+    const top = new THREE.MeshStandardMaterial({ color: palette.top, roughness: 0.8 });
+    const legMat = new THREE.MeshStandardMaterial({ color: palette.legs, roughness: 0.85 });
+    const skin = new THREE.MeshStandardMaterial({ color: palette.skin, roughness: 0.7 });
 
     // Hips sit 0.8 m above the feet; the torso pivots there so it can lean.
     this.torsoPivot.position.y = 0.8;
-    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.2), hoodie);
+    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.2), top);
     this.torso.position.y = 0.25;
     this.head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.22), skin);
     this.head.position.y = 0.65;
-    const beanie = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.24), new THREE.MeshStandardMaterial({ color: 0x1d1f26 }));
-    beanie.position.y = 0.1;
-    this.head.add(beanie);
+    const hat = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.24), new THREE.MeshStandardMaterial({ color: palette.hat }));
+    hat.position.y = 0.1;
+    this.head.add(hat);
     this.torsoPivot.add(this.torso, this.head);
 
     for (const sx of [1, -1]) {
       const arm = new THREE.Group();
       arm.position.set(sx * 0.23, 0.46, 0);
-      const armMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), hoodie);
+      const armMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), top);
       armMesh.position.y = -0.23;
       arm.add(armMesh);
       this.torsoPivot.add(arm);
@@ -50,18 +74,29 @@ export class Rider {
 
       const leg = new THREE.Group();
       leg.position.set(sx * 0.1, 0.8, 0);
-      const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.8, 0.13), jeans);
+      const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.8, 0.13), legMat);
       legMesh.position.y = -0.4;
       leg.add(legMesh);
       this.root.add(leg);
       this.legs.push(leg);
       this.limbMeshes.push(armMesh, legMesh);
     }
+    if (smoker) {
+      this.ember = new THREE.Mesh(
+        new THREE.BoxGeometry(0.035, 0.035, 0.035),
+        new THREE.MeshBasicMaterial({ color: 0xff7a2a }),
+      );
+      this.ember.position.set(0, -0.5, 0.05);
+      this.arms[1].add(this.ember);
+    }
     this.root.add(this.torsoPivot);
-    cart.group.add(this.root);
   }
 
-  /** World position of the rider's chest: the camera follows this during a bail. */
+  get ragdolled(): boolean {
+    return this.ragdoll !== null;
+  }
+
+  /** World position of the chest while ragdolled: the camera follows this during a bail. */
   focus(target: THREE.Vector3): boolean {
     if (!this.ragdoll) return false;
     const t = this.ragdoll[0].body.translation();
@@ -69,7 +104,7 @@ export class Rider {
     return true;
   }
 
-  update(dt: number): void {
+  update(dt: number, time: number): void {
     if (this.ragdoll) {
       for (const part of this.ragdoll) {
         const t = part.body.translation();
@@ -80,36 +115,60 @@ export class Rider {
       return;
     }
 
-    const cart = this.cart;
-    const riding = cart.state === 'riding';
     const k = Math.min(1, dt * 12);
     const lerp = (a: number, b: number) => a + (b - a) * k;
+    let torsoLean = 0;
+    let armL = 0;
+    let armR = 0;
+    let legL = 0;
+    let legR = 0;
+    let roll = 0;
 
-    // Pushing: feet on the ground behind the cart. Riding: standing on the rear frame.
-    const targetZ = riding ? -0.47 : -0.95;
-    const targetY = riding ? -0.04 : -0.26;
-    this.root.position.z = lerp(this.root.position.z, targetZ);
-    this.root.position.y = lerp(this.root.position.y, targetY);
-    this.root.rotation.z = lerp(this.root.rotation.z, riding ? cart.lean * 0.3 : cart.lean * 0.08);
-
-    let torsoLean: number;
-    let armReach: number;
-    if (riding) {
-      // Counter the cart's pitch a little so a wheelie reads as leaning back.
-      torsoLean = 0.25 - cart.pitch * 0.5;
-      armReach = -0.9;
-      this.stride = 0;
-    } else {
-      const effort = Math.min(1, Math.abs(cart.fwdSpeed) / 6);
-      torsoLean = 0.25 + effort * 0.35;
-      armReach = -1.15;
-      this.stride += dt * (4 + Math.abs(cart.fwdSpeed) * 2.2) * Math.sign(cart.fwdSpeed || 1);
+    if (this.pose !== 'idle') {
+      const [y, z] = SEAT[this.pose];
+      this.root.position.y = lerp(this.root.position.y, y);
+      this.root.position.z = lerp(this.root.position.z, z);
+      this.root.position.x = lerp(this.root.position.x, 0);
     }
+
+    if (this.pose === 'push') {
+      const effort = Math.min(1, Math.abs(this.speed) / 8);
+      torsoLean = 0.25 + effort * 0.4;
+      armL = armR = -1.15 - torsoLean;
+      this.stride += dt * (4 + Math.abs(this.speed) * 1.9) * Math.sign(this.speed || 1);
+      legL = Math.sin(this.stride) * Math.min(1, Math.abs(this.speed) * 0.16);
+      legR = -legL;
+      roll = this.lean * 0.08;
+    } else if (this.pose === 'ride') {
+      // Counter the cart's pitch a little so a wheelie reads as leaning back.
+      torsoLean = 0.25 - this.pitch * 0.5 + Math.min(0.25, Math.abs(this.speed) * 0.015);
+      armL = armR = -0.9 - torsoLean;
+      roll = this.lean * 0.3;
+    } else if (this.pose === 'sit') {
+      torsoLean = -0.12;
+      legL = legR = -2.05;
+      armL = armR = -0.5;
+      roll = this.lean * 0.15;
+    } else {
+      // Idle: shift weight, and take a drag now and then.
+      torsoLean = 0.05 + Math.sin(time * 0.7 + this.stride) * 0.03;
+      const drag = Math.max(0, Math.sin(time * 0.5 + this.stride * 2) - 0.7) / 0.3;
+      armR = -drag * 2.3;
+      roll = Math.sin(time * 0.45 + this.stride) * 0.03;
+    }
+
+    if (this.throwTime > 0) {
+      // Wind up behind the head, then whip forward.
+      this.throwTime = Math.max(0, this.throwTime - dt);
+      armR = -3.0 + (1 - this.throwTime / 0.35) * 2.4;
+    }
+
+    this.root.rotation.z = lerp(this.root.rotation.z, roll);
     this.torsoPivot.rotation.x = lerp(this.torsoPivot.rotation.x, torsoLean);
-    const swing = riding ? 0 : Math.sin(this.stride) * Math.min(0.9, Math.abs(cart.fwdSpeed) * 0.18);
-    this.legs[0].rotation.x = lerp(this.legs[0].rotation.x, swing);
-    this.legs[1].rotation.x = lerp(this.legs[1].rotation.x, -swing);
-    for (const arm of this.arms) arm.rotation.x = lerp(arm.rotation.x, armReach - torsoLean);
+    this.arms[0].rotation.x = lerp(this.arms[0].rotation.x, armL);
+    this.arms[1].rotation.x = this.throwTime > 0 ? armR : lerp(this.arms[1].rotation.x, armR);
+    this.legs[0].rotation.x = lerp(this.legs[0].rotation.x, legL);
+    this.legs[1].rotation.x = lerp(this.legs[1].rotation.x, legR);
   }
 
   /** Turn the posed model into a ragdoll flying at `velocity`. */
@@ -143,7 +202,7 @@ export class Rider {
       const mesh = new THREE.Mesh(home.geometry, home.material);
       for (const child of home.children) mesh.add(child.clone());
       this.scene.add(mesh);
-      return { body, mesh, home };
+      return { body, mesh };
     };
 
     const torso = makePart(this.torso, [0.17, 0.25, 0.1]);
@@ -175,7 +234,7 @@ export class Rider {
     this.root.visible = false;
   }
 
-  /** Back on your feet behind the cart. */
+  /** Back on your feet. */
   recover(): void {
     if (!this.ragdoll) return;
     for (const part of this.ragdoll) {
