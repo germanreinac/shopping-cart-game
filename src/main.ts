@@ -247,8 +247,12 @@ async function start(): Promise<void> {
     }
 
     const speedK = Math.min(1, player.speed / 20);
-    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 2.2));
-    camGoal.y = focus.y + 1.5;
+    // On a short, wide screen (a phone held sideways) the rider ends up tiny, so the camera
+    // sits closer and lower, and the view is narrowed to keep the same width of world in frame.
+    const short = Math.max(0, Math.min(1, (620 - window.innerHeight) / 240));
+    const close = 1 - short * 0.2;
+    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 2.2) * close);
+    camGoal.y = focus.y + 1.5 - short * 0.25;
     if (!camReady) {
       camera.position.copy(camGoal);
       camReady = true;
@@ -265,7 +269,9 @@ async function start(): Promise<void> {
     camRoll += (-(cart?.lean ?? 0) * 0.07 * speedK - camRoll) * Math.min(1, dt * 4);
     camera.rotateZ(camRoll + (Math.random() - 0.5) * s * 0.15);
     fovKick = Math.max(0, fovKick - dt * 14);
-    const fov = 62 + speedK * 20 + fovKick;
+    const wide = Math.max(1, camera.aspect / 1.6);
+    const base = 62 + speedK * (20 - short * 8) + fovKick;
+    const fov = (2 * Math.atan(Math.tan((base * Math.PI) / 360) / wide) * 180) / Math.PI;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 6);
       camera.updateProjectionMatrix();
