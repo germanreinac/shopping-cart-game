@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon } from './style';
 import { RAPIER, FIXED_DT, CART_GROUPS, WHEEL_RAY_GROUPS, groundBelow } from './physics';
 import type { Controls } from './input';
 
@@ -8,7 +9,6 @@ export type CartEvent =
   | { type: 'hopOn' }
   | { type: 'hopOff' }
   | { type: 'tooSlow' }
-  | { type: 'kick' }
   | { type: 'land'; strength: number }
   | { type: 'trick'; label: string; points: number }
   | { type: 'crash'; velocity: THREE.Vector3 };
@@ -16,38 +16,35 @@ export type CartEvent =
 // ---- Tuning. All SI units (metres, seconds, kilograms). ----
 export const TUNE = {
   mass: 60, // cart + rider, kept constant so the suspension behaves the same in every state
-  pushAccel: 5.5, // m/s² while running behind the cart
-  jogSpeed: 9, // top speed on foot with no cigarettes left
-  sprintSpeed: 15.5, // top speed while burning cigarettes
+  accel: 7, // m/s² while holding push, on foot or on the cart
+  cruiseSpeed: 13, // top speed with no cigarettes left
+  sprintSpeed: 21, // top speed while burning cigarettes
   sprintDrain: 0.4, // cigarettes per second while sprinting
   staminaMax: 5,
-  staminaRegen: 0.1, // cigarettes per second when not sprinting
-  kickBoost: 1.6, // m/s per kick-push while riding
-  kickCost: 0.34, // cigarettes per kick
-  kickCooldown: 0.5,
-  kickMaxSpeed: 14.5,
+  staminaRegen: 0.12, // cigarettes per second when not sprinting
+  hopOnSpeed: 6, // pushing faster than this, you jump on automatically
+  minHopOnSpeed: 1.2, // slowest you can jump on by pressing hop
+  remountSpeed: 2.5, // riding slower than this with push held, you step off and run
   pushBrake: 6.0, // pulling back on the handle while on foot
   pushCoast: 1.6, // jogging to a stop when you let go of push
   rideDrag: 0.4, // rolling resistance while riding (m/s²)
-  rideDragQuad: 0.005, // extra drag that grows with speed²
-  pushYawTorque: 140, // steering by the handle
-  rideYawTorque: 120, // steering by leaning: weaker, so it drifts
-  yawDamping: 48,
+  rideDragQuad: 0.004, // extra drag that grows with speed²
+  yawTorque: 330, // steering strength
+  yawDamping: 110,
   airYawTorque: 150, // spinning in the air
   airYawDamping: 18,
   airLevel: 60, // how hard the rider keeps the cart level in the air
-  driftCatch: 260, // counter-torque that stops a drift becoming a spin-out
+  antiRoll: 900, // keeps all four wheels down in hard corners
+  driftCatch: 600, // counter-torque that stops a drift becoming a spin-out
   driftCatchAngle: 0.75, // rad of slip before the catch kicks in
-  rearGrip: 0.62,
-  wheelieRaiseRate: 0.75, // rad/s the nose climbs while you hold back
-  wheelieDropRate: 1.6, // rad/s it comes down when you let go
-  wheelieBailPitch: 1.0, // rad: past this you go over backwards
-  hopSpeed: 3.7, // vertical take-off speed of a kerb hop
-  minHopOnSpeed: 1.2,
-  remountSpeed: 2.5, // below this you step off and push again
+  rearGrip: 1.3, // sideways grip of the back wheels; lower = more drift
+  wheelieRaiseRate: 0.9, // rad/s the nose climbs while you hold back
+  wheelieDropRate: 1.8, // rad/s it comes down when you let go
+  wheelieMaxPitch: 0.8, // rad: the nose stops here, so a held wheelie never loops out
+  hopSpeed: 6, // vertical take-off speed of a hop
   tipCrashUp: 0.45, // cart "up" · world up below this = tipped over
-  kerbTripSpeed: 4.5, // riding into a kerb faster than this without hopping = bail
-  slamCrashDv: 4.5, // horizontal speed lost in one step = hit something solid
+  slamCrashDv: 7, // horizontal speed lost in one step = hit something solid
+  recoverTime: 1, // seconds on the floor before you are stood back up automatically
 };
 
 const WHEEL_RADIUS = 0.08;
@@ -87,9 +84,9 @@ function wireMeshTexture(): THREE.CanvasTexture {
 /** Builds the trolley model out of primitives. Origin matches the physics body origin. */
 export function buildCartMesh(accent = 0xd8342c): { group: THREE.Group; wheels: THREE.Object3D[] } {
   const group = new THREE.Group();
-  const steel = new THREE.MeshStandardMaterial({ color: 0xc4ccd4, metalness: 0.35, roughness: 0.35 });
-  const plastic = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.5 });
-  const rubber = new THREE.MeshStandardMaterial({ color: 0x18181a, roughness: 0.9 });
+  const steel = toon({ color: 0xc4ccd4, metalness: 0.35, roughness: 0.35 });
+  const plastic = toon({ color: accent, roughness: 0.5 });
+  const rubber = toon({ color: 0x18181a, roughness: 0.9 });
 
   const bar = (w: number, h: number, d: number, x: number, y: number, z: number, mat: THREE.Material = steel) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
@@ -104,7 +101,7 @@ export function buildCartMesh(accent = 0xd8342c): { group: THREE.Group; wheels: 
     const tex = wireMeshTexture().clone();
     tex.needsUpdate = true;
     tex.repeat.set(repX, repY);
-    const mat = new THREE.MeshStandardMaterial({
+    const mat = toon({
       color: 0xc4ccd4, metalness: 0.35, roughness: 0.35,
       alphaMap: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
     });
@@ -200,7 +197,7 @@ export class Cart {
   private airTime = 0;
   private wheelieTime = 0;
   private wheelieTarget = 0;
-  private kickTimer = 0;
+  private crashTimer = 0;
   private airYaw = 0;
   private driftTime = 0;
   private driftPoints = 0;
@@ -278,54 +275,47 @@ export class Cart {
     const flatLen = Math.hypot(fwd.x, fwd.z);
     fwdFlat.set(fwd.x, 0, fwd.z).multiplyScalar(flatLen > 1e-4 ? 1 / flatLen : 0);
 
+    // One throttle for both states: on foot it is running, on the cart it is kick-pushing.
+    // Past cruising speed it burns cigarettes.
+    const braking = this.state === 'pushing' && ctl.back > 0.1;
+    if (ctl.push && onWheels && !braking) {
+      const top = this.stamina > 0 ? TUNE.sprintSpeed : TUNE.cruiseSpeed;
+      const accel = TUNE.accel * Math.max(-0.2, Math.min(1, (top - this.fwdSpeed) / 3));
+      if (this.fwdSpeed > TUNE.cruiseSpeed - 0.5 && this.stamina > 0) {
+        this.sprinting = true;
+        this.stamina = Math.max(0, this.stamina - TUNE.sprintDrain * dt);
+      }
+      b.applyImpulse(tmp.copy(fwdFlat).multiplyScalar(m * accel * dt), true);
+    }
+
     if (this.state === 'pushing') {
-      if (ctl.jump) {
-        if (this.fwdSpeed >= TUNE.minHopOnSpeed && onWheels) {
-          this.state = 'riding';
-          this.stillTime = 0;
-          this.events.push({ type: 'hopOn' });
-        } else {
-          this.events.push({ type: 'tooSlow' });
-        }
-      } else if (onWheels) {
+      if (onWheels && (this.fwdSpeed >= TUNE.hopOnSpeed || (ctl.jump && this.fwdSpeed >= TUNE.minHopOnSpeed))) {
+        // Going fast enough: jump on the back automatically.
+        this.state = 'riding';
+        this.stillTime = 0;
+        this.events.push({ type: 'hopOn' });
+      } else if (onWheels && !ctl.push || braking) {
         let accel = 0;
-        if (ctl.back > 0.1) {
+        if (braking) {
           // Dig your heels in; once stopped, drag the cart backwards slowly.
           accel = this.fwdSpeed > -1.5 ? -TUNE.pushBrake * ctl.back : 0;
-        } else if (ctl.push) {
-          // Past a jog you are sprinting, which burns cigarettes.
-          const top = this.stamina > 0 ? TUNE.sprintSpeed : TUNE.jogSpeed;
-          accel = TUNE.pushAccel * Math.max(-0.2, Math.min(1, (top - this.fwdSpeed) / 3));
-          if (this.fwdSpeed > TUNE.jogSpeed - 0.5 && this.stamina > 0) {
-            this.sprinting = true;
-            this.stamina = Math.max(0, this.stamina - TUNE.sprintDrain * dt);
-          }
         } else if (Math.abs(this.fwdSpeed) > 0.05) {
           accel = -Math.sign(this.fwdSpeed) * Math.min(TUNE.pushCoast, Math.abs(this.fwdSpeed) / dt);
         }
-        b.applyImpulse(tmp.copy(fwdFlat).multiplyScalar(m * accel * dt), true);
+        if (onWheels) b.applyImpulse(tmp.copy(fwdFlat).multiplyScalar(m * accel * dt), true);
       }
     } else if (this.state === 'riding') {
       if (ctl.push && this.speed < TUNE.remountSpeed && onWheels) {
+        // Too slow to kick along: step off and run.
         this.state = 'pushing';
         this.events.push({ type: 'hopOff' });
-      } else if (
-        ctl.push && onWheels && this.kickTimer <= 0 && this.stamina >= TUNE.kickCost &&
-        this.fwdSpeed > 0 && this.fwdSpeed < TUNE.kickMaxSpeed
-      ) {
-        // Kick-push: one foot down to keep the speed up. Costs a bit of a cigarette.
-        this.kickTimer = TUNE.kickCooldown;
-        this.stamina -= TUNE.kickCost;
-        b.applyImpulse(tmp.copy(fwdFlat).multiplyScalar(m * TUNE.kickBoost), true);
-        this.events.push({ type: 'kick' });
       }
       if (ctl.jump && onWheels) {
         b.applyImpulse({ x: 0, y: m * TUNE.hopSpeed, z: 0 }, true);
       }
-      // Wheelie: holding back raises the nose steadily, letting go drops it.
-      // Hold it too long and you go over backwards.
+      // Wheelie: hold back to lift the nose, let go to drop it and bank the points.
       if (ctl.back > 0.1 && this.grounded >= 1) {
-        this.wheelieTarget = Math.min(1.2, Math.max(this.wheelieTarget, this.pitch, 0.1) + TUNE.wheelieRaiseRate * ctl.back * dt);
+        this.wheelieTarget = Math.min(TUNE.wheelieMaxPitch, Math.max(this.wheelieTarget, this.pitch, 0.1) + TUNE.wheelieRaiseRate * ctl.back * dt);
       } else {
         this.wheelieTarget = Math.max(0, this.wheelieTarget - TUNE.wheelieDropRate * dt);
       }
@@ -347,12 +337,14 @@ export class Cart {
     if (this.state !== 'crashed') {
       const av = b.angvel();
       if (this.grounded >= 1) {
-        const authority = this.state === 'pushing' ? TUNE.pushYawTorque : TUNE.rideYawTorque;
-        let torque = -ctl.steer * authority - av.y * TUNE.yawDamping;
+        let torque = -ctl.steer * TUNE.yawTorque - av.y * TUNE.yawDamping;
         // Drift catch: past a certain slip angle, pull the nose back toward the direction of travel.
         const over = Math.abs(this.slip) - TUNE.driftCatchAngle;
         if (over > 0 && Math.abs(this.slip) < 2.2 && this.speed > 4) torque += Math.sign(this.slip) * over * TUNE.driftCatch;
         b.applyTorqueImpulse({ x: 0, y: torque * dt, z: 0 }, true);
+        // Anti-roll: not realistic, but it keeps hard corners fun instead of fatal.
+        const roll = -(side.y * TUNE.antiRoll + (av.x * fwd.x + av.y * fwd.y + av.z * fwd.z) * 120) * dt;
+        b.applyTorqueImpulse({ x: fwd.x * roll, y: fwd.y * roll, z: fwd.z * roll }, true);
       } else {
         // In the air: spin freely, and keep the cart roughly level so jumps are landable.
         const spin = -ctl.steer * TUNE.airYawTorque - av.y * TUNE.airYawDamping;
@@ -367,7 +359,6 @@ export class Cart {
     }
 
     // Catch your breath (slowly) whenever you are not sprinting.
-    this.kickTimer -= dt;
     if (!this.sprinting) this.stamina = Math.min(TUNE.staminaMax, this.stamina + TUNE.staminaRegen * dt);
 
     this.prevVel.copy(vel);
@@ -386,10 +377,6 @@ export class Cart {
     }
     const frontUp = !this.vehicle.wheelIsInContact(0) && !this.vehicle.wheelIsInContact(1);
     const rearDown = this.vehicle.wheelIsInContact(2) || this.vehicle.wheelIsInContact(3);
-
-    // Riding straight into a kerb at speed without hopping it trips the cart.
-    const tripped =
-      this.state === 'riding' && touchingKerb && !this.onKerb && this.airTime === 0 && this.speed > TUNE.kerbTripSpeed;
 
     // Airtime and landings.
     if (this.grounded === 0) {
@@ -420,7 +407,7 @@ export class Cart {
     if (this.state === 'riding' && frontUp && rearDown && this.pitch > 0.12 && this.wheelieTarget > 0) {
       // The higher the nose, the faster the points build.
       this.wheelieTime += dt;
-      this.wheeliePoints += dt * (60 + 320 * this.pitch);
+      this.wheeliePoints += dt * (40 + 150 * this.pitch);
       this.pendingPoints = Math.round(this.wheeliePoints / 10) * 10;
       this.pendingLabel = 'WHEELIE';
     } else if (this.wheelieTime > 0 && (this.grounded === 0 || !frontUp)) {
@@ -465,21 +452,25 @@ export class Cart {
     }
 
     // Bails: tipped over, went over backwards, or slammed into something.
-    if (this.state !== 'crashed') {
+    if (this.state === 'crashed') {
+      this.autoRecover();
+    } else {
       const lost = Math.hypot(this.prevVel.x - vel.x, this.prevVel.z - vel.z);
       const tipped = up.y < TUNE.tipCrashUp;
-      const looped = this.state === 'riding' && this.pitch > TUNE.wheelieBailPitch;
-      if (tipped || looped || tripped || lost > TUNE.slamCrashDv) {
-        if (tripped) {
-          // Front wheels stop dead, the back end keeps coming.
-          this.body.applyImpulse({ x: -vel.x * 20, y: 90, z: -vel.z * 20 }, true);
-          this.body.applyTorqueImpulse(tmp.copy(side).multiplyScalar(45), true);
-        }
+      const looped = this.state === 'riding' && this.pitch > 1.15;
+      if (tipped || looped || lost > TUNE.slamCrashDv) {
         this.state = 'crashed';
+        this.crashTimer = 0;
         this.clearTrick();
         this.events.push({ type: 'crash', velocity: this.prevVel.clone() });
       }
     }
+  }
+
+  /** After a bail, get back up on your own once the dust settles. */
+  private autoRecover(): void {
+    this.crashTimer += FIXED_DT;
+    if (this.crashTimer >= TUNE.recoverTime) this.reset();
   }
 
   /** Stand the cart back up where it stopped (or at the spawn point if it left the lot). */
@@ -489,7 +480,13 @@ export class Cart {
     const x = Math.max(-this.bounds.x + 3, Math.min(this.bounds.x - 3, t.x));
     const z = Math.max(-this.bounds.z + 3, Math.min(this.bounds.z - 3, t.z));
     const floor = groundBelow(this.world, x, t.y + 1.5, z, 8);
-    if (floor !== null && this.state === 'crashed') this.placeAt(x, floor, z, this.lastYaw);
+    if (floor !== null && this.state === 'crashed') {
+      // If that would leave you nose-first against a wall, face the other way.
+      let yaw = this.lastYaw;
+      const ahead = new RAPIER.Ray({ x, y: floor + 0.7, z }, { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) });
+      if (this.world.castRay(ahead, 7, true, RAPIER.QueryFilterFlags.ONLY_FIXED)) yaw += Math.PI;
+      this.placeAt(x, floor, z, yaw);
+    }
     else this.placeAt(this.spawnPose.x, 0, this.spawnPose.z, this.spawnPose.yaw);
   }
 

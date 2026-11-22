@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, buildSky, outline } from '../style';
 import { RAPIER, addStaticBox } from '../physics';
 import { buildCartMesh } from '../cart';
 import type { LightPool } from '../lights';
@@ -63,7 +64,7 @@ function wetAsphaltTexture(): THREE.CanvasTexture {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const g = c.getContext('2d')!;
-  g.fillStyle = 'rgb(200,200,200)';
+  g.fillStyle = 'rgb(255,255,255)';
   g.fillRect(0, 0, 256, 256);
   let seed = 7;
   const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -71,15 +72,17 @@ function wetAsphaltTexture(): THREE.CanvasTexture {
     const x = rand() * 256, y = rand() * 256, r = 14 + rand() * 40;
     for (const [ox, oy] of [[0, 0], [256, 0], [-256, 0], [0, 256], [0, -256]]) {
       const grad = g.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
-      grad.addColorStop(0, 'rgba(40,40,40,0.9)');
-      grad.addColorStop(1, 'rgba(40,40,40,0)');
+      grad.addColorStop(0, 'rgba(150,155,190,0.55)');
+      grad.addColorStop(0.7, 'rgba(150,155,190,0.5)');
+      grad.addColorStop(0.72, 'rgba(150,155,190,0)');
+      grad.addColorStop(1, 'rgba(150,155,190,0)');
       g.fillStyle = grad;
       g.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
     }
   }
   for (let i = 0; i < 5000; i++) {
-    const v = 150 + Math.floor(rand() * 100);
-    g.fillStyle = `rgba(${v},${v},${v},0.5)`;
+    const v = 200 + Math.floor(rand() * 55);
+    g.fillStyle = `rgba(${v},${v},${v},0.35)`;
     g.fillRect(rand() * 256, rand() * 256, 1.5, 1.5);
   }
   const tex = new THREE.CanvasTexture(c);
@@ -93,14 +96,12 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   const kerbHandles = new Set<number>();
   const glow = glowTexture();
 
-  scene.background = new THREE.Color(0x05070e);
-  scene.fog = new THREE.FogExp2(0x05070e, 0.009);
-  scene.add(new THREE.HemisphereLight(0x3a4a70, 0x120d08, 1.1));
+  buildSky(scene);
 
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x55585e, roughness: 0.85 });
-  const darkConcrete = new THREE.MeshStandardMaterial({ color: 0x2c2f36, roughness: 0.9 });
-  const kerbMat = new THREE.MeshStandardMaterial({ color: 0x6d6f73, roughness: 0.8 });
-  const yellow = new THREE.MeshStandardMaterial({ color: 0xd9a91a, roughness: 0.7 });
+  const concrete = toon({ color: 0x8a8ca8, roughness: 0.85 });
+  const darkConcrete = toon({ color: 0x4a4d6e, roughness: 0.9 });
+  const kerbMat = toon({ color: 0xa9abc2, roughness: 0.8 });
+  const yellow = toon({ color: 0xd9a91a, roughness: 0.7 });
 
   /** A box you can see and hit. Position is the centre, sizes are half-extents. */
   const solid = (x: number, y: number, z: number, hx: number, hy: number, hz: number, mat: THREE.Material, friction = 0.6) => {
@@ -128,7 +129,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     hole.closePath();
     shape.holes.push(hole);
   }
-  const asphalt = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 1, roughnessMap: wetAsphaltTexture(), metalness: 0.05 });
+  const asphalt = toon({ color: 0x4d5078, map: wetAsphaltTexture() });
   const ground = new THREE.Mesh(new THREE.ShapeGeometry(shape).rotateX(-Math.PI / 2), asphalt);
   scene.add(ground);
 
@@ -153,8 +154,8 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   wall(-LOT_X - 0.5, 0, 0.5, LOT_Z);
 
   // ---- Lamps: real light comes from the pool; every lamp also gets a glow and a ground decal. ----
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x3a3d44, roughness: 0.6, metalness: 0.4 });
-  const lampHeadMat = new THREE.MeshStandardMaterial({ color: 0x221a10, emissive: SODIUM, emissiveIntensity: 3 });
+  const poleMat = toon({ color: 0x3a3d44, roughness: 0.6, metalness: 0.4 });
+  const lampHeadMat = toon({ color: 0x221a10, emissive: SODIUM, emissiveIntensity: 3 });
   const glowMat = new THREE.SpriteMaterial({ map: glow, color: SODIUM, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.85 });
   const lampSpots: [number, number][] = [];
   const lamp = (x: number, z: number) => {
@@ -169,7 +170,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     sprite.scale.setScalar(4.5);
     scene.add(pole, base, head, sprite);
     world.createCollider(RAPIER.ColliderDesc.cylinder(4, 0.3).setTranslation(x, 4, z));
-    lights.add({ x, y: 7.6, z, color: SODIUM, intensity: 460, distance: 44 });
+    lights.add({ x, y: 7.6, z, color: SODIUM, intensity: 520, distance: 44 });
     lampSpots.push([x, z]);
   };
 
@@ -209,7 +210,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   }
 
   // ---- Ramps: wedges that rise along their heading and end in a drop. ----
-  const rampMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3c, roughness: 0.75, flatShading: true, side: THREE.DoubleSide });
+  const rampMat = toon({ color: 0xd9824a, roughness: 0.75, flatShading: true, side: THREE.DoubleSide });
   const kicker = (x: number, z: number, yaw: number, width: number, length: number, height: number) => {
     const w = width / 2;
     const pts = [-w, 0, 0, w, 0, 0, -w, 0, length, w, 0, length, -w, height, length, w, height, length];
@@ -241,7 +242,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   kicker(20, 58, EAST, 4, 5, 1.2);
 
   // ---- Underground level ----
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x3a3c40, roughness: 0.55 });
+  const floorMat = toon({ color: 0x6a6d8a, roughness: 0.55 });
   const gcx = (GARAGE.x0 + GARAGE.x1) / 2, gcz = (GARAGE.z0 + GARAGE.z1) / 2;
   const ghx = (GARAGE.x1 - GARAGE.x0) / 2, ghz = (GARAGE.z1 - GARAGE.z0) / 2;
   solid(gcx, G - 0.25, gcz, ghx, 0.25, ghz, floorMat, 0.9);
@@ -260,12 +261,12 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   // Yellow stripe at the foot of each column row, and aisle edge lines.
   for (const x of [RAMP.x0 - 0.5, RAMP.x1 + 0.5]) lineSlots.push([x, G + 0.012, -15], [x, G + 0.012, -5], [x, G + 0.012, 5], [x, G + 0.012, 15], [x, G + 0.012, 25]);
   // Strip lights.
-  const tubeMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: TUBE, emissiveIntensity: 2.5 });
+  const tubeMat = toon({ color: 0x111111, emissive: TUBE, emissiveIntensity: 2.5 });
   for (const [x, z] of [[54, -22], [54, -4], [54, 14], [54, 32], [40, -8], [40, 18], [72, -14], [72, 10], [72, 30]]) {
     const tube = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 2.4), tubeMat);
     tube.position.set(x, -SLAB - 0.08, z);
     scene.add(tube);
-    lights.add({ x, y: -1.4, z, color: TUBE, intensity: 70, distance: 26, underground: true });
+    lights.add({ x, y: -1.4, z, color: TUBE, intensity: 45, distance: 26, underground: true });
   }
 
   // The two ramps, their retaining walls, and guard walls round the openings up top.
@@ -321,7 +322,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     tex.colorSpace = THREE.SRGBColorSpace;
     const sign = new THREE.Mesh(
       new THREE.PlaneGeometry(6.4, 1.6),
-      new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.6 }),
+      toon({ color: 0x000000, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.6 }),
     );
     sign.position.set(cx, 1.5, z - facing * 0.02);
     if (facing > 0) sign.rotation.y = Math.PI;
@@ -334,7 +335,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   // ---- Bay lines (surface and underground) ----
   const lines = new THREE.InstancedMesh(
     new THREE.PlaneGeometry(0.12, 5).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: 0xb9b9ae, roughness: 0.7 }),
+    toon({ color: 0xb9b9ae, roughness: 0.7 }),
     lineSlots.length,
   );
   const m4 = new THREE.Matrix4();
@@ -352,10 +353,10 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
 
   // ---- Parked cars ----
   const carColours = [0x7a1f24, 0x1f3a5f, 0x8a8d91, 0x2a2c30, 0x3d5a45];
-  const glass = new THREE.MeshStandardMaterial({ color: 0x0b0e14, roughness: 0.15, metalness: 0.6 });
+  const glass = toon({ color: 0x0b0e14, roughness: 0.15, metalness: 0.6 });
   const car = (x: number, y: number, z: number, ci: number) => {
     const group = new THREE.Group();
-    const paint = new THREE.MeshStandardMaterial({ color: carColours[ci % carColours.length], roughness: 0.35, metalness: 0.5 });
+    const paint = toon({ color: carColours[ci % carColours.length], roughness: 0.35, metalness: 0.5 });
     const lower = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.7, 4.3), paint);
     lower.position.y = 0.6;
     const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.6, 2.2), glass);
@@ -387,7 +388,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
 
   // ---- Trolley bay with loose trolleys you can crash into ----
   const BAY_X = 12.3, BAY_Z = 19.4;
-  const railMat = new THREE.MeshStandardMaterial({ color: 0x2f6fb5, roughness: 0.5, metalness: 0.3 });
+  const railMat = toon({ color: 0x2f6fb5, roughness: 0.5, metalness: 0.3 });
   for (const sx of [1, -1]) {
     const rail = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 4.4), railMat);
     rail.position.set(BAY_X + sx * 0.8, 1.0, BAY_Z);
@@ -416,7 +417,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   // ---- Traffic cones: knock them over (or have your passenger do it) for points. ----
   const coneGeo = new THREE.ConeGeometry(0.17, 0.6, 10);
   const coneBaseGeo = new THREE.BoxGeometry(0.4, 0.04, 0.4);
-  const coneMat = new THREE.MeshStandardMaterial({ color: 0xff5a1f, roughness: 0.6, emissive: 0x3a1000 });
+  const coneMat = toon({ color: 0xff5a1f, roughness: 0.6, emissive: 0x3a1000 });
   const cones: Cone[] = [];
   const cone = (x: number, y: number, z: number) => {
     const body = world.createRigidBody(
@@ -429,6 +430,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     foot.position.y = -0.29;
     mesh.add(top, foot);
     scene.add(mesh);
+    outline(mesh, 0.03);
     cones.push({ body, mesh, tipped: false });
   };
   for (let x = -18; x >= -68; x -= 10) cone(x, 0, 14 + (Math.abs(x) % 20 === 8 ? 1.5 : -1.5));
@@ -437,10 +439,10 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
 
   // ---- Supermarket ----
   const storeZ = -LOT_Z;
-  solid(0, 5.5, storeZ - 7, LOT_X + 1, 5.5, 7, new THREE.MeshStandardMaterial({ color: 0x23262e, roughness: 0.9 }), 0.3);
+  solid(0, 5.5, storeZ - 7, LOT_X + 1, 5.5, 7, toon({ color: 0x3a3d62, roughness: 0.9 }), 0.3);
   const windows = new THREE.Mesh(
     new THREE.PlaneGeometry(96, 3.2),
-    new THREE.MeshStandardMaterial({ color: 0x0c1016, emissive: 0xbcd6ff, emissiveIntensity: 0.9 }),
+    toon({ color: 0x0c1016, emissive: 0xbcd6ff, emissiveIntensity: 0.9 }),
   );
   windows.position.set(0, 2.0, storeZ + 0.02);
   scene.add(windows);
@@ -449,7 +451,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     mullion.position.set(x, 2.0, storeZ + 0.05);
     scene.add(mullion);
   }
-  const canopy = new THREE.Mesh(new THREE.BoxGeometry(104, 0.3, 3.5), new THREE.MeshStandardMaterial({ color: 0x8a1f25, roughness: 0.6 }));
+  const canopy = new THREE.Mesh(new THREE.BoxGeometry(104, 0.3, 3.5), toon({ color: 0x8a1f25, roughness: 0.6 }));
   canopy.position.set(0, 4.2, storeZ + 1.7);
   scene.add(canopy);
   for (const x of [-36, -12, 12, 36]) lights.add({ x, y: 2.6, z: storeZ + 3.5, color: 0xbcd6ff, intensity: 170, distance: 30 });
@@ -479,7 +481,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   drawSign(true);
   const sign = new THREE.Mesh(
     new THREE.PlaneGeometry(44, 5.5),
-    new THREE.MeshStandardMaterial({ color: 0x000000, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 2.2 }),
+    toon({ color: 0x000000, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 2.2 }),
   );
   sign.position.set(0, 7.6, storeZ + 0.05);
   scene.add(sign);

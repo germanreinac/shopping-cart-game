@@ -75,9 +75,8 @@ export class Hud {
     this.set('race', this.raceEl, race, true);
 
     let hint: string;
-    if (h.state === 'crashed') hint = 'Press <b>R</b> to get back up';
-    else if (h.state === 'riding') hint = '<b>A / D</b> lean and drift · <b>W</b> kick-push · tap <b>S</b> wheelie · <b>Space</b> hop';
-    else hint = 'Hold <b>W</b> to run (sprinting burns cigarettes) · <b>A / D</b> steer · <b>Space</b> hop on';
+    if (h.state === 'crashed') hint = 'Ouch';
+    else hint = 'Hold <b>W</b> to go (top speed burns cigarettes) · <b>A / D</b> steer and drift · <b>Space</b> jump · <b>S</b> wheelie';
     if (h.passenger && h.state !== 'crashed') hint += ` · <b>F</b> ${h.passenger} throws`;
     if (h.race === 'idle') hint += ' · <b>Enter</b> race';
     this.set('hint', this.hintEl, hint, true);

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, outline } from './style';
 import type { Cart } from './cart';
 
 const RESPAWN = 22;
@@ -12,13 +13,14 @@ export class Pickups {
   constructor(scene: THREE.Scene, spots: THREE.Vector3[]) {
     const box = new THREE.BoxGeometry(0.34, 0.5, 0.14);
     const lid = new THREE.BoxGeometry(0.345, 0.17, 0.145);
-    const white = new THREE.MeshStandardMaterial({ color: 0xf4efe6, emissive: 0x8a8578, roughness: 0.6 });
-    const red = new THREE.MeshStandardMaterial({ color: 0xd8342c, emissive: 0x7a1510, roughness: 0.6 });
+    const white = toon({ color: 0xf4efe6, emissive: 0x8a8578, roughness: 0.6 });
+    const red = toon({ color: 0xd8342c, emissive: 0x7a1510, roughness: 0.6 });
     for (const spot of spots) {
       const group = new THREE.Group();
       const top = new THREE.Mesh(lid, red);
       top.position.y = 0.17;
       group.add(new THREE.Mesh(box, white), top);
+      outline(group, 0.03);
       group.rotation.z = 0.25;
       const home = spot.clone();
       home.y += 0.95;

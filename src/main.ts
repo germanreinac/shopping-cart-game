@@ -149,8 +149,8 @@ async function start(): Promise<void> {
     }
     if (!rider.focus(focus)) focus.copy(cart.group.position);
 
-    const speedK = Math.min(1, cart.speed / 14);
-    camGoal.copy(focus).addScaledVector(heading, -(3.6 + speedK * 1.6));
+    const speedK = Math.min(1, cart.speed / 20);
+    camGoal.copy(focus).addScaledVector(heading, -(3.8 + speedK * 2.2));
     camGoal.y = focus.y + 1.5;
     if (!camReady) {
       camera.position.copy(camGoal);
@@ -167,7 +167,7 @@ async function start(): Promise<void> {
     camera.lookAt(lookAt);
     camRoll += (-cart.lean * 0.07 * speedK - camRoll) * Math.min(1, dt * 4);
     camera.rotateZ(camRoll + (Math.random() - 0.5) * s * 0.15);
-    const fov = 62 + speedK * 16;
+    const fov = 62 + speedK * 20;
     if (Math.abs(camera.fov - fov) > 0.05) {
       camera.fov += (fov - camera.fov) * Math.min(1, dt * 3);
       camera.updateProjectionMatrix();

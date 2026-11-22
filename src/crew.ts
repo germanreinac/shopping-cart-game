@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon } from './style';
 import { RAPIER, RAGDOLL_GROUPS, FIXED_DT } from './physics';
 import { Person, type Palette } from './person';
 import type { Cart } from './cart';
@@ -53,7 +54,7 @@ export class Crew {
   private cans: Can[] = [];
   private cooldown = 0;
   private canGeo = new THREE.CylinderGeometry(0.035, 0.035, 0.12, 8);
-  private canMat = new THREE.MeshStandardMaterial({ color: 0xc9d2da, metalness: 0.5, roughness: 0.3, emissive: 0x30363c });
+  private canMat = toon({ color: 0xc9d2da, metalness: 0.5, roughness: 0.3, emissive: 0x30363c });
 
   constructor(
     private scene: THREE.Scene,

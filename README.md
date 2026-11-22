@@ -17,24 +17,28 @@ Then open the link Vite prints.
 
 | Action | Keyboard | Gamepad | Touch |
 | --- | --- | --- | --- |
-| Run and push (sprints past a jog) / kick-push when riding | hold `W` / `↑` | `RT` or `X` | PUSH |
-| Steer / lean / spin in the air | `A` `D` / `←` `→` | left stick | drag left side |
-| Hop on, then hop | `Space` | `A` | HOP |
-| Wheelie (riding) / brake (pushing) | `S` / `↓` | stick back | drag down |
+| Go: run, then ride and kick along | hold `W` / `↑` | `RT` or `X` | PUSH |
+| Steer / drift / spin in the air | `A` `D` / `←` `→` | left stick | drag left side |
+| Jump | `Space` | `A` | HOP |
+| Wheelie (riding) / brake (on foot) | `S` / `↓` | stick back | drag down |
 | Passenger throws a can | `F` | `B` or `RB` | THROW |
 | Start or abandon a race | `Enter` | Start | RACE |
-| Get back up after a bail | `R` | `Y` | ↺ |
+| Get back up early after a bail | `R` | `Y` | ↺ |
 
-The loop: push to build speed, hop on, land tricks before the cart rolls to a stop, repeat.
+Hold go and the character runs with the cart, jumps on by themselves once it is moving fast enough, and keeps kicking it along. The handling is arcade, not realistic.
 
-- **Cigarettes are stamina.** Sprinting faster than a jog and kick-pushing while riding burn them. They come back slowly on their own; packs around the lot give three at once.
-- **Drift:** lean hard at speed and the back end slides. Points build while you hold the slide and bank when you straighten up.
-- **Wheelie:** hold back to lift the nose and let go to bank the points. Hold too long and you go over backwards.
-- **Air:** kicker ramps, a funbox and a big launch ramp sit in the south-west corner. Steer in the air to spin; 180s and 360s score.
-- **Kerb hop:** hop onto or off a kerb island for a bonus. Ride into a kerb at speed without hopping and you tumble.
+- **Cigarettes are stamina.** Going faster than cruising speed burns them. They come back slowly on their own; packs around the lot give three at once.
+- **Drift:** steer hard at speed and the back end slides. Points build while you hold the slide and bank when you straighten up.
+- **Wheelie:** hold back to lift the nose and let go to bank the points.
+- **Air:** jump anywhere, or use the kicker ramps, funbox and big launch ramp in the south-west corner. Steer in the air to spin; 180s and 360s score.
+- **Kerb hop:** jump onto or off a kerb island for a bonus.
 - **Crew:** teens hang around the lot. Roll past one slowly and they hop in the basket, then throw cans at rival riders (slows them down) and traffic cones.
 - **Race:** one lap against two rivals, north up the centre lane, down through the underground level and back. Best lap is saved in the browser.
-- **Bails:** tip over, loop out, clip a kerb or slam into something solid and everyone on the cart ragdolls.
+- **Bails:** tip over or slam into something solid and everyone on the cart ragdolls. You are stood back up after a second.
+
+## Look
+
+Cartoon and stylised: flat toon shading with hard light bands, ink outlines on characters, a dusk sky and a silhouetted skyline. The references are Inside (mood, haze, silhouettes) and OlliOlli World (bold flat colour). It all lives in `src/style.ts`.
 
 ## Code
 
@@ -48,6 +52,7 @@ src/
   race.ts            circuit, rival riders, checkpoints, lap timing
   pickups.ts         cigarette packs
   lights.ts          pool of real lights moved to the lamps nearest the camera
+  style.ts           toon materials, outlines, sky and skyline
   input.ts           keyboard, gamepad, touch
   hud.ts             score, speed, cigarettes, race status, popups
   scene/parkingLot.ts  car park, ramps, underground level and colliders

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { toon, outline } from './style';
 import { RAPIER, RAGDOLL_GROUPS } from './physics';
 
 export interface Palette {
@@ -48,9 +49,9 @@ export class Person {
   private ember: THREE.Mesh | null = null;
 
   constructor(private scene: THREE.Scene, private world: RAPIER.World, palette: Palette, smoker = false) {
-    const top = new THREE.MeshStandardMaterial({ color: palette.top, roughness: 0.8 });
-    const legMat = new THREE.MeshStandardMaterial({ color: palette.legs, roughness: 0.85 });
-    const skin = new THREE.MeshStandardMaterial({ color: palette.skin, roughness: 0.7 });
+    const top = toon({ color: palette.top, roughness: 0.8 });
+    const legMat = toon({ color: palette.legs, roughness: 0.85 });
+    const skin = toon({ color: palette.skin, roughness: 0.7 });
 
     // Hips sit 0.8 m above the feet; the torso pivots there so it can lean.
     this.torsoPivot.position.y = 0.8;
@@ -58,7 +59,7 @@ export class Person {
     this.torso.position.y = 0.25;
     this.head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.22), skin);
     this.head.position.y = 0.65;
-    const hat = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.24), new THREE.MeshStandardMaterial({ color: palette.hat }));
+    const hat = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.24), toon({ color: palette.hat }));
     hat.position.y = 0.1;
     this.head.add(hat);
     this.torsoPivot.add(this.torso, this.head);
@@ -90,6 +91,7 @@ export class Person {
       this.arms[1].add(this.ember);
     }
     this.root.add(this.torsoPivot);
+    outline(this.root);
   }
 
   get ragdolled(): boolean {
