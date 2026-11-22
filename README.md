@@ -47,7 +47,13 @@ Hold go and the character runs with the cart, jumps on by themselves once it is 
 
 ## Look
 
-A mysterious night, after Kentucky Route Zero: a deep teal dark, pale lamps throwing visible cones of light, and beyond the walls only silhouettes: hills, trees, telephone poles, a radio mast with a slow red beacon, one farmhouse with a lit window, and a phone box nobody is ever in. Shading is flat and cartoon with thin ink outlines on characters. It all lives in `src/style.ts`.
+Three references pulled together:
+
+- **OlliOlli World** for the characters, taken from the character sheets: lanky noodle limbs, soft capsule shapes with no hard corners, flat colour with one hard shadow band, dot eyes and cheek marks, skate gear, and ink lines in a dark shade of the fill rather than black. The palette is dusty mid-tones (mustard, plum, olive, denim, terracotta) with a few loud pops. HUD popups are wobbly raspberry and mustard blobs.
+- **Kentucky Route Zero** for the night: a deep teal dark, pale lamps throwing visible cones of light, and beyond the walls only silhouettes: hills, trees, telephone poles, a radio mast with a slow red beacon, one farmhouse with a lit window, and a phone box nobody is ever in.
+- **Sludge Life** for the grime: the whole scene is rendered small and scaled up with hard pixels, walls are tagged with dripping spray paint, glowing green sludge has leaked in corners, and factory stacks on the horizon breathe smog into a sour green skyline.
+
+It all lives in `src/style.ts`, with the character build in `src/person.ts`.
 
 ## Code
 

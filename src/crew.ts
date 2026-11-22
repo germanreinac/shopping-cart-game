@@ -19,13 +19,14 @@ export type CrewEvent =
   | { type: 'moved'; name: string }
   | { type: 'hit'; label: string; points: number };
 
+// Dusty mid-tones with a few saturated pops, after the OlliOlli World sheets.
 const PALETTES: Palette[] = [
-  { top: 0x2f8f6b, legs: 0x3a3f52, skin: 0xc98e6a, hat: 0xd9a91a },
-  { top: 0x6b4fb5, legs: 0x23262e, skin: 0xe9b999, hat: 0x23262e },
-  { top: 0xd98a2b, legs: 0x4a5f96, skin: 0x9c6b4a, hat: 0x7a1f24 },
-  { top: 0x9aa3ad, legs: 0x2c3a2f, skin: 0xe2ac8c, hat: 0x2f6fb5 },
-  { top: 0x1f3a5f, legs: 0x5a4a3a, skin: 0xb98058, hat: 0xc9453c },
-  { top: 0xb5456f, legs: 0x2a2c30, skin: 0xe9c0a0, hat: 0x111111 },
+  { top: 0x8fb3d9, legs: 0xe8c547, skin: 0x8a5a3c, hat: 0xd9a521, headwear: 'cap', bareArms: true, shoes: 0x4f6f96 },
+  { top: 0xf1e9e0, legs: 0x4f6f96, skin: 0x7a4a32, hat: 0x2a2030, headwear: 'hair', bareArms: true, shoes: 0x6b2d4a },
+  { top: 0xe0456b, legs: 0x3a3340, skin: 0xe9c547, hat: 0xe0456b, headwear: 'helmet', shoes: 0x9bc96b },
+  { top: 0x9bc96b, legs: 0x6b2d4a, skin: 0xe9a77c, hat: 0x6b2d4a, headwear: 'beanie', pads: true, shoes: 0xf1e9e0 },
+  { top: 0xa9714b, legs: 0x7a7a45, skin: 0xb98058, hat: 0x8fb3d9, headwear: 'cap', bareArms: true, shoes: 0x2a2030 },
+  { top: 0xb7a3b5, legs: 0xd9a521, skin: 0xe9a77c, hat: 0x4f6f96, headwear: 'beanie', shoes: 0xe0456b },
 ];
 const NAMES = ['Nico', 'Vale', 'Santi', 'Cami', 'Mati', 'Juli'];
 

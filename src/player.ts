@@ -36,7 +36,7 @@ export class Player {
   private stamina = 0;
 
   constructor(private scene: THREE.Scene, world: RAPIER.World, private carts: Cart[], first: Cart) {
-    this.person = new Person(scene, world, { top: 0xc9453c, legs: 0x4a5f96, skin: 0xe2ac8c, hat: 0x1d1f26 });
+    this.person = new Person(scene, world, { top: 0x7a7a45, legs: 0xd9a521, skin: 0xe9a77c, hat: 0x6b2d4a, headwear: 'helmet', bareArms: true, pads: true, shoes: 0x8a3340 });
     this.body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -50, 0));
     this.collider = world.createCollider(RAPIER.ColliderDesc.capsule(0.5, 0.3).setTranslation(0, 0.8, 0), this.body);
     this.controller = world.createCharacterController(0.04);

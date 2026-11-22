@@ -6,7 +6,15 @@ export interface Palette {
   top: number;
   legs: number;
   skin: number;
+  /** Helmet, cap or beanie colour. */
   hat: number;
+  /** What is on their head. Defaults to a helmet. */
+  headwear?: 'helmet' | 'cap' | 'beanie' | 'hair';
+  /** Bare arms (t-shirt) rather than sleeves. */
+  bareArms?: boolean;
+  shoes?: number;
+  /** Knee pads, skate-style. */
+  pads?: boolean;
 }
 
 /** push: running behind a cart. ride: standing on its back. sit: in the basket. idle: hanging around. */
@@ -25,7 +33,7 @@ const SEAT: Record<Exclude<Pose, 'idle' | 'run'>, [number, number]> = {
 };
 
 /**
- * A blocky teen. Posed and animated while attached to something; on a bail every body
+ * A lanky cartoon teen. Posed and animated while attached to something; on a bail every body
  * part becomes a physics box joined at shoulders, hips and neck.
  */
 export class Person {
@@ -49,34 +57,96 @@ export class Person {
   private ember: THREE.Mesh | null = null;
 
   constructor(private scene: THREE.Scene, private world: RAPIER.World, palette: Palette, smoker = false) {
-    const top = toon({ color: palette.top, roughness: 0.8 });
-    const legMat = toon({ color: palette.legs, roughness: 0.85 });
-    const skin = toon({ color: palette.skin, roughness: 0.7 });
+    // Built after the OlliOlli World character sheets: lanky noodle limbs, soft capsule
+    // shapes with no hard corners, flat colour, dot eyes, skate gear.
+    const top = toon({ color: palette.top });
+    const legMat = toon({ color: palette.legs });
+    const skin = toon({ color: palette.skin });
+    const hatMat = toon({ color: palette.hat });
+    const shoeMat = toon({ color: palette.shoes ?? 0x8a3340 });
+    const white = toon({ color: 0xf1e9e0 });
+    const ink = new THREE.MeshBasicMaterial({ color: 0x2a1a22 });
+    const blush = new THREE.MeshBasicMaterial({ color: 0xe9788a });
+    const detail = (mesh: THREE.Mesh) => {
+      mesh.userData.outline = true; // too small to need its own ink line
+      return mesh;
+    };
 
     // Hips sit 0.8 m above the feet; the torso pivots there so it can lean.
     this.torsoPivot.position.y = 0.8;
-    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.5, 0.2), top);
+    this.torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.15, 0.22, 4, 12).scale(1.12, 1, 0.74), top);
     this.torso.position.y = 0.25;
-    this.head = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.24, 0.22), skin);
-    this.head.position.y = 0.65;
-    const hat = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.1, 0.24), toon({ color: palette.hat }));
-    hat.position.y = 0.1;
-    this.head.add(hat);
+    this.head = new THREE.Mesh(new THREE.CapsuleGeometry(0.125, 0.08, 4, 14), skin);
+    this.head.position.y = 0.66;
+
+    // Face: two dots, two cheeks, a little wedge of nose. It looks along +z.
+    for (const sx of [1, -1]) {
+      const eye = detail(new THREE.Mesh(new THREE.SphereGeometry(0.017, 8, 6), ink));
+      eye.position.set(sx * 0.047, 0.012, 0.115);
+      const cheek = detail(new THREE.Mesh(new THREE.SphereGeometry(0.022, 8, 6).scale(1, 0.7, 0.3), blush));
+      cheek.position.set(sx * 0.075, -0.035, 0.1);
+      this.head.add(eye, cheek);
+    }
+    const nose = detail(new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.05, 6).rotateX(Math.PI / 2), skin));
+    nose.position.set(0, -0.015, 0.135);
+    this.head.add(nose);
+
+    const wear = palette.headwear ?? 'helmet';
+    if (wear === 'helmet') {
+      const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.15, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.56), hatMat);
+      helmet.position.y = 0.035;
+      this.head.add(helmet);
+    } else if (wear === 'cap') {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(0.135, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.45), hatMat);
+      cap.position.y = 0.06;
+      // Worn back to front, naturally.
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.016, 14).scale(1, 1, 1.25), hatMat);
+      brim.position.set(0, 0.075, -0.15);
+      this.head.add(cap, brim);
+    } else if (wear === 'beanie') {
+      const beanie = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.5).scale(1, 1.25, 1), hatMat);
+      beanie.position.y = 0.055;
+      const bobble = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), hatMat);
+      bobble.position.y = 0.24;
+      this.head.add(beanie, bobble);
+    } else {
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 8).scale(1.05, 1.1, 1.05), hatMat);
+      hair.position.set(0, 0.05, -0.045);
+      this.head.add(hair);
+    }
     this.torsoPivot.add(this.torso, this.head);
 
     for (const sx of [1, -1]) {
       const arm = new THREE.Group();
       arm.position.set(sx * 0.23, 0.46, 0);
-      const armMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.1), top);
+      const armMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.42, 3, 8), palette.bareArms ? skin : top);
       armMesh.position.y = -0.23;
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(0.052, 8, 6), skin);
+      hand.position.y = -0.25;
+      armMesh.add(hand);
+      if (palette.bareArms) {
+        const sleeve = detail(new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.08, 3, 8), top));
+        sleeve.position.y = 0.17;
+        armMesh.add(sleeve);
+      }
       arm.add(armMesh);
       this.torsoPivot.add(arm);
       this.arms.push(arm);
 
       const leg = new THREE.Group();
       leg.position.set(sx * 0.1, 0.8, 0);
-      const legMesh = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.8, 0.13), legMat);
+      const legMesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.052, 0.68, 3, 8), legMat);
       legMesh.position.y = -0.4;
+      const shoe = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 6).scale(1, 0.62, 1.55), shoeMat);
+      shoe.position.set(0, -0.36, 0.035);
+      legMesh.add(shoe);
+      if (palette.pads) {
+        const pad = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 6).scale(1, 1.15, 0.7), white);
+        pad.position.set(0, -0.02, 0.035);
+        const band = detail(new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.13, 10), hatMat));
+        band.position.y = -0.02;
+        legMesh.add(band, pad);
+      }
       leg.add(legMesh);
       this.root.add(leg);
       this.legs.push(leg);
@@ -84,10 +154,11 @@ export class Person {
     }
     if (smoker) {
       this.ember = new THREE.Mesh(
-        new THREE.BoxGeometry(0.035, 0.035, 0.035),
+        new THREE.SphereGeometry(0.022, 6, 5),
         new THREE.MeshBasicMaterial({ color: 0xff7a2a }),
       );
-      this.ember.position.set(0, -0.5, 0.05);
+      this.ember.userData.outline = true;
+      this.ember.position.set(0, -0.52, 0.06);
       this.arms[1].add(this.ember);
     }
     this.root.add(this.torsoPivot);

@@ -35,10 +35,10 @@ const START_PAD = { x: -7, z: 58, radius: 2.6 };
 
 // Each kid has a different pace and a lane they like. Lanes are metres left/right of the racing line.
 const RIVALS: { name: string; speed: number; offset: number; accent: number; palette: Palette }[] = [
-  { name: 'Toto', speed: 18.2, offset: 3.2, accent: 0x2f8f6b, palette: { top: 0xe8e2d0, legs: 0x23262e, skin: 0xc98e6a, hat: 0x2f8f6b } },
-  { name: 'Flor', speed: 20.6, offset: -1.6, accent: 0x6b4fb5, palette: { top: 0x23262e, legs: 0x6b4fb5, skin: 0xe9b999, hat: 0xd9a91a } },
-  { name: 'Rulo', speed: 19.2, offset: -3.2, accent: 0xd98a2b, palette: { top: 0x2f6fb5, legs: 0x3a3f52, skin: 0x9c6b4a, hat: 0xd8342c } },
-  { name: 'Mica', speed: 19.9, offset: 1.6, accent: 0xb5456f, palette: { top: 0xd9a91a, legs: 0x2a2c30, skin: 0xe9c0a0, hat: 0xb5456f } },
+  { name: 'Toto', speed: 18.2, offset: 3.2, accent: 0x2f8f6b, palette: { top: 0xf1e9e0, legs: 0x3a3340, skin: 0xc98e6a, hat: 0x9bc96b, headwear: 'helmet', pads: true, bareArms: true } },
+  { name: 'Flor', speed: 20.6, offset: -1.6, accent: 0x6b4fb5, palette: { top: 0x3a3340, legs: 0x8a6bd0, skin: 0xe9b999, hat: 0xe8c547, headwear: 'hair' } },
+  { name: 'Rulo', speed: 19.2, offset: -3.2, accent: 0xd98a2b, palette: { top: 0x4f6f96, legs: 0x7a7a45, skin: 0x9c6b4a, hat: 0xe0456b, headwear: 'cap', bareArms: true } },
+  { name: 'Mica', speed: 19.9, offset: 1.6, accent: 0xb5456f, palette: { top: 0xe8c547, legs: 0x4f6f96, skin: 0xe9c0a0, hat: 0xd62f55, headwear: 'beanie', pads: true } },
 ];
 
 const yAxis = new THREE.Vector3(0, 1, 0);

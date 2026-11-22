@@ -16,8 +16,10 @@ const SPARE_COLOURS = [0x2f6fb5, 0x2f8f6b, 0xd9a91a, 0x6b4fb5, 0xb5456f, 0x9aa3a
 async function start(): Promise<void> {
   const world = await initPhysics();
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // Rendered small and scaled up with hard pixels: the lo-fi, grimy half of the look.
+  const RENDER_HEIGHT = 420;
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+  renderer.domElement.style.imageRendering = 'pixelated';
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   document.getElementById('app')!.appendChild(renderer.domElement);
@@ -25,6 +27,7 @@ async function start(): Promise<void> {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(62, 1, 0.1, 600);
   const resize = () => {
+    renderer.setPixelRatio(Math.min(1, RENDER_HEIGHT / window.innerHeight));
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();

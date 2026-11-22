@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { toon, buildSky, outline } from '../style';
+import { toon, buildSky, buildSmog, graffiti, outline } from '../style';
 import { RAPIER, addStaticBox } from '../physics';
 import type { Rail } from '../cart';
 import type { LightPool } from '../lights';
@@ -101,6 +101,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   const glow = glowTexture();
 
   const sky = buildSky(scene);
+  const smog = buildSmog(scene);
 
   const concrete = toon({ color: 0x5a6c7c, roughness: 0.85 });
   const darkConcrete = toon({ color: 0x24323f, roughness: 0.9 });
@@ -279,7 +280,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     const tube = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 2.4), tubeMat);
     tube.position.set(x, -SLAB - 0.08, z);
     scene.add(tube);
-    lights.add({ x, y: -1.4, z, color: TUBE, intensity: 34, distance: 26, underground: true });
+    lights.add({ x, y: -1.4, z, color: TUBE, intensity: 52, distance: 26, underground: true });
   }
 
   // The two ramps, their retaining walls, and guard walls round the openings up top.
@@ -547,6 +548,41 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   scene.add(sign);
   lights.add({ x: 0, y: 7.5, z: storeZ + 5, color: 0xfff0c8, intensity: 200, distance: 46 });
 
+  // ---- Tags and sludge: someone has been here before you. ----
+  const SLIME = '#9bff5a', PINK = '#ff4f8b', BONE = '#f1e9e0', MUSTARD = '#e8c547';
+  const front = storeZ + 0.06;
+  graffiti(scene, 'GHOST', SLIME, -62, 2.4, front, 0, 9);
+  graffiti(scene, 'ZOOM', PINK, 66, 2.6, front, 0, 8);
+  graffiti(scene, 'NO CARTS', BONE, -78, 5.6, front, 0, 10);
+  graffiti(scene, 'SLUDGE', SLIME, 78, 6.2, front, 0, 9);
+  // Underground: the walls are covered.
+  graffiti(scene, 'RATS', PINK, GARAGE.x0 + 0.02, G + 2.2, -12, Math.PI / 2, 7);
+  graffiti(scene, 'CART KIDS', MUSTARD, GARAGE.x0 + 0.02, G + 2.3, 16, Math.PI / 2, 9);
+  graffiti(scene, 'GLUG', SLIME, GARAGE.x1 - 0.02, G + 2.2, -8, -Math.PI / 2, 7);
+  graffiti(scene, 'BURP', BONE, GARAGE.x1 - 0.02, G + 2.4, 24, -Math.PI / 2, 7);
+  graffiti(scene, 'DOWN', PINK, RAMP.x0 + 0.02, -1.6, -42, Math.PI / 2, 6);
+  graffiti(scene, 'UP?', SLIME, RAMP.x1 - 0.02, -1.8, 50, -Math.PI / 2, 5);
+  // Tunnel headwalls, facing the approach.
+  graffiti(scene, 'EAT', MUSTARD, RAMP.x1 + 2.5, 1.5, RAMP_IN.bottom - 0.03, Math.PI, 3.4);
+  graffiti(scene, 'FUMES', SLIME, RAMP.x0 - 2.3, 1.4, RAMP_OUT.bottom + 0.03, 0, 3.6);
+
+  // Sludge: glowing puddles of something that leaked, and their sour light.
+  const sludgeMat = new THREE.MeshBasicMaterial({ color: 0x9bff5a, transparent: true, opacity: 0.6, depthWrite: false });
+  const sludge = (x: number, y: number, z: number, r: number, underground = false) => {
+    for (const [dx, dz, k] of [[0, 0, 1], [r * 0.7, r * 0.4, 0.55], [-r * 0.5, r * 0.6, 0.4]]) {
+      const blob = new THREE.Mesh(new THREE.CircleGeometry(r * k, 18).rotateX(-Math.PI / 2), sludgeMat);
+      blob.position.set(x + dx, y + 0.025, z + dz);
+      blob.scale.set(1, 1, 0.7 + k * 0.3);
+      scene.add(blob);
+    }
+    lights.add({ x, y: y + 0.6, z, color: 0x9bff5a, intensity: 26, distance: 14, underground });
+  };
+  sludge(-84, 0, 40, 2.6);
+  sludge(44, 0, -84, 2.2);
+  sludge(80, G, -24, 2.4, true);
+  sludge(34, G, 6, 1.8, true);
+  sludge(-6, 0, -84, 1.6);
+
   // ---- Race circuit: north up the centre lane, east along the shop front, down through the
   // underground level, back up, and west along the south wall to the start. ----
   const P = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
@@ -587,6 +623,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     cartSpots,
     update(time: number) {
       sky.update(time);
+      smog.update(time);
       if (time > nextFlicker) {
         flickerOn = !flickerOn;
         nextFlicker = time + (flickerOn ? 0.15 + Math.random() * 2.5 : 0.04 + Math.random() * 0.25);

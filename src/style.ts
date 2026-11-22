@@ -24,9 +24,20 @@ export function toon(params: ToonParams): THREE.MeshToonMaterial {
   return new THREE.MeshToonMaterial({ gradientMap: toonRamp(), ...rest });
 }
 
-const outlineMat = new THREE.MeshBasicMaterial({ color: 0x0b0d1a, side: THREE.BackSide });
+const inkCache = new Map<number, THREE.MeshBasicMaterial>();
+/** Ink for an outline: a deep, slightly plum version of the fill colour, never pure black. */
+function inkFor(fill: THREE.Color): THREE.MeshBasicMaterial {
+  const key = fill.getHex();
+  let mat = inkCache.get(key);
+  if (!mat) {
+    const c = fill.clone().multiplyScalar(0.32).lerp(new THREE.Color(0x2a1226), 0.35);
+    mat = new THREE.MeshBasicMaterial({ color: c, side: THREE.BackSide });
+    inkCache.set(key, mat);
+  }
+  return mat;
+}
 
-/** Adds an inverted-hull ink outline to every mesh under `root`. */
+/** Adds an inverted-hull ink outline to every mesh under `root` (skips meshes flagged userData.outline). */
 export function outline(root: THREE.Object3D, thickness = 0.014): void {
   const meshes: THREE.Mesh[] = [];
   root.traverse((o) => {
@@ -35,7 +46,8 @@ export function outline(root: THREE.Object3D, thickness = 0.014): void {
   for (const mesh of meshes) {
     mesh.geometry.computeBoundingBox();
     const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
-    const hull = new THREE.Mesh(mesh.geometry, outlineMat);
+    const fill = (mesh.material as THREE.MeshToonMaterial).color ?? new THREE.Color(0x222222);
+    const hull = new THREE.Mesh(mesh.geometry, inkFor(fill));
     hull.userData.outline = true;
     // Grow each axis by the same absolute amount so thin limbs get as bold a line as torsos.
     hull.scale.set(1 + (2 * thickness) / size.x, 1 + (2 * thickness) / size.y, 1 + (2 * thickness) / size.z);
@@ -49,7 +61,7 @@ export function outline(root: THREE.Object3D, thickness = 0.014): void {
  * and a radio mast blinking far off. Returns a per-frame update for the beacon.
  */
 export function buildSky(scene: THREE.Scene): { update(time: number): void } {
-  const HAZE = 0x0c1f2c;
+  const HAZE = 0x0e2226;
   scene.background = new THREE.Color(HAZE);
   scene.fog = new THREE.FogExp2(HAZE, 0.0068);
 
@@ -62,7 +74,7 @@ export function buildSky(scene: THREE.Scene): { update(time: number): void } {
       uniforms: {
         top: { value: new THREE.Color(0x03060f) },
         mid: { value: new THREE.Color(0x0b2233) },
-        horizon: { value: new THREE.Color(0x3f7480) },
+        horizon: { value: new THREE.Color(0x55784a) }, // smog: a sour green where the sky meets the land
       },
       vertexShader: 'varying vec3 vDir; void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
       fragmentShader: `
@@ -177,6 +189,90 @@ export function buildSky(scene: THREE.Scene): { update(time: number): void } {
       const phase = (time % 3.2) / 3.2;
       const glow = Math.max(0, Math.sin(phase * Math.PI * 2 - 1.2));
       beaconMat.color.setRGB(0.15 + glow * 0.85, 0.02 + glow * 0.2, 0.02 + glow * 0.16);
+    },
+  };
+}
+
+/**
+ * A spray-paint tag on a wall. The Sludge Life half of the look: crude, wobbly, dripping
+ * lettering in sickly colours over the tidy flat world.
+ */
+export function graffiti(scene: THREE.Scene, text: string, color: string, x: number, y: number, z: number, rotY: number, width: number): void {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  let seed = text.length * 97 + text.charCodeAt(0) * 13;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  g.font = `900 ${text.length > 7 ? 92 : 120}px "Arial Black", Impact, sans-serif`;
+  g.textBaseline = 'middle';
+  g.lineJoin = 'round';
+  const total = g.measureText(text).width;
+  let penX = (512 - total) / 2;
+  for (const ch of text) {
+    const w = g.measureText(ch).width;
+    g.save();
+    g.translate(penX + w / 2, 112 + (rand() - 0.5) * 26);
+    g.rotate((rand() - 0.5) * 0.3);
+    g.transform(1, 0, -0.18, 1, 0, 0);
+    g.lineWidth = 16;
+    g.strokeStyle = 'rgba(8,12,10,0.9)';
+    g.strokeText(ch, -w / 2, 0);
+    g.fillStyle = color;
+    g.fillText(ch, -w / 2, 0);
+    g.restore();
+    // Drips.
+    if (rand() > 0.45) {
+      g.fillStyle = color;
+      const dx = penX + w * (0.25 + rand() * 0.5);
+      g.fillRect(dx, 150, 5 + rand() * 4, 30 + rand() * 60);
+    }
+    penX += w;
+  }
+  // Overspray speckle.
+  g.fillStyle = color;
+  for (let i = 0; i < 60; i++) g.fillRect(rand() * 512, rand() * 256, 2, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, width / 2),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 }),
+  );
+  mesh.position.set(x, y, z);
+  mesh.rotation.y = rotY;
+  scene.add(mesh);
+}
+
+/** Factory stacks on the horizon breathing out lit smog, and the green murk it leaves low in the sky. */
+export function buildSmog(scene: THREE.Scene): { update(time: number): void } {
+  const stackMat = new THREE.MeshBasicMaterial({ color: 0x060d10 });
+  const puffMat = new THREE.MeshBasicMaterial({ color: 0x3a5632, transparent: true, opacity: 0.24, fog: false, depthWrite: false });
+  const puffs: { mesh: THREE.Mesh; x: number; z: number; phase: number }[] = [];
+  for (const [x, z, h] of [[-260, -210, 70], [-235, -230, 52], [250, 190, 64], [140, 300, 48]]) {
+    const stack = new THREE.Mesh(new THREE.CylinderGeometry(4, 6.5, h, 8), stackMat);
+    stack.position.set(x, h / 2, z);
+    scene.add(stack);
+    for (let i = 0; i < 5; i++) {
+      const mesh = new THREE.Mesh(new THREE.SphereGeometry(9 + i * 3, 8, 6), puffMat);
+      scene.add(mesh);
+      puffs.push({ mesh, x, z, phase: i / 5 + (x % 7) * 0.1 });
+      mesh.userData.base = h;
+    }
+  }
+  // A band of murk sitting on the horizon.
+  const murk = new THREE.Mesh(
+    new THREE.CylinderGeometry(420, 420, 60, 40, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x6f8f3a, transparent: true, opacity: 0.08, side: THREE.BackSide, fog: false, depthWrite: false }),
+  );
+  murk.position.y = 26;
+  scene.add(murk);
+  return {
+    update(time: number) {
+      for (const p of puffs) {
+        const t = (time * 0.035 + p.phase) % 1;
+        p.mesh.position.set(p.x + t * 60, p.mesh.userData.base + 6 + t * 46, p.z + t * 18);
+        p.mesh.scale.setScalar(0.6 + t * 1.3);
+      }
     },
   };
 }
