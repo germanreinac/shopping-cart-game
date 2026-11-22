@@ -8,12 +8,15 @@ export const FIXED_DT = 1 / 60;
 // Collision groups: (membership << 16) | filter.
 const GROUP_CART = 0x0002;
 const GROUP_RAGDOLL = 0x0004;
+const GROUP_RIVAL = 0x0008;
 /** The player's cart: collides with everything except the ragdoll (which spawns inside it). */
-export const CART_GROUPS = (GROUP_CART << 16) | (0xffff & ~GROUP_RAGDOLL);
+export const CART_GROUPS = (GROUP_CART << 16) | (0xffff & ~(GROUP_RAGDOLL | GROUP_RIVAL));
+/** Rival riders: solid to the world but not to the player, who shoves them instead of crashing. */
+export const RIVAL_GROUPS = (GROUP_RIVAL << 16) | (0xffff & ~GROUP_CART);
 /** Ragdoll parts: collide with everything except the player's cart. */
 export const RAGDOLL_GROUPS = (GROUP_RAGDOLL << 16) | (0xffff & ~GROUP_CART);
 /** Wheel raycasts: roll over everything except ragdoll parts. */
-export const WHEEL_RAY_GROUPS = (0xffff << 16) | (0xffff & ~GROUP_RAGDOLL);
+export const WHEEL_RAY_GROUPS = (0xffff << 16) | (0xffff & ~(GROUP_RAGDOLL | GROUP_RIVAL));
 
 export async function initPhysics(): Promise<RAPIER.World> {
   await RAPIER.init();

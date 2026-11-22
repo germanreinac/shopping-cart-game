@@ -119,11 +119,14 @@ async function start(): Promise<void> {
 
     for (const ev of race.events) {
       if (ev.type === 'count') hud.popup(ev.text, 'big');
-      else if (ev.type === 'checkpoint') hud.popup(`Checkpoint ${ev.index}/${ev.total}`, 'info');
-      else {
-        hud.popup(`${ORDINAL[ev.place]} · ${formatTime(ev.time)}`, 'big');
-        if (ev.best) hud.popup('New best lap', 'info');
-        award('RACE', [0, 1500, 700, 300][ev.place] ?? 0);
+      else if (ev.type === 'lap') hud.popup(ev.lap === ev.laps ? 'Final lap' : `Lap ${ev.lap}/${ev.laps}`, 'info');
+      else if (ev.type === 'shove') {
+        shake = Math.max(shake, 0.2);
+        award(`SHOVED ${ev.name.toUpperCase()}`, race.state === 'running' ? 100 : 0);
+      } else {
+        hud.popup(`${ORDINAL[ev.place]} of ${ev.racers} · ${formatTime(ev.time)}`, 'big');
+        if (ev.best) hud.popup('New best time', 'info');
+        award('RACE', [0, 2000, 1200, 700, 300][ev.place] ?? 0);
       }
     }
     race.events.length = 0;
@@ -252,10 +255,10 @@ async function start(): Promise<void> {
       passenger: crew.passenger ? crew.passengerName : '',
       race: race.state,
       raceTime: race.time,
-      checkpoint: race.next,
-      checkpoints: race.total,
+      lap: race.lap,
+      laps: race.laps,
       place: race.place,
-      racers: race.rivals.length + 1,
+      racers: race.racers,
       best: race.best,
     });
     renderer.render(scene, camera);

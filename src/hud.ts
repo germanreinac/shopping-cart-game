@@ -13,15 +13,15 @@ export interface HudState {
   passenger: string;
   race: RaceState;
   raceTime: number;
-  checkpoint: number;
-  checkpoints: number;
+  lap: number;
+  laps: number;
   place: number;
   racers: number;
   best: number | null;
 }
 
 const fmt = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
-const ORDINAL = ['', '1ST', '2ND', '3RD', '4TH'];
+const ORDINAL = ['', '1ST', '2ND', '3RD', '4TH', '5TH', '6TH'];
 
 /** DOM overlay: score, speed, cigarettes, race status, trick popups and a context hint. */
 export class Hud {
@@ -68,9 +68,9 @@ export class Hud {
 
     let race = '';
     if (h.race === 'running' || h.race === 'countdown') {
-      race = `<b>${fmt(h.raceTime)}</b> · ${ORDINAL[h.place]} of ${h.racers} · checkpoint ${h.checkpoint}/${h.checkpoints}`;
+      race = `<b>${fmt(h.raceTime)}</b> · ${ORDINAL[h.place]} of ${h.racers} · lap ${h.lap}/${h.laps}`;
     } else if (h.best !== null) {
-      race = `best lap ${fmt(h.best)}`;
+      race = `best race ${fmt(h.best)}`;
     }
     this.set('race', this.raceEl, race, true);
 
@@ -78,7 +78,7 @@ export class Hud {
     if (h.state === 'crashed') hint = 'Ouch';
     else hint = 'Hold <b>W</b> to go · <b>A / D</b> steer, hold a hard turn to drift and let go for a boost · <b>Space</b> jump (hold for higher) · <b>S</b> wheelie';
     if (h.passenger && h.state !== 'crashed') hint += ` · <b>F</b> ${h.passenger} throws`;
-    if (h.race === 'idle') hint += ' · <b>Enter</b> race';
+    if (h.race === 'idle') hint += ' · <b>Enter</b> or the green ring to race';
     this.set('hint', this.hintEl, hint, true);
 
     if (this.throwBtn) {

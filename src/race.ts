@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RAPIER, FIXED_DT, groundBelow } from './physics';
+import { RAPIER, FIXED_DT, RIVAL_GROUPS, groundBelow } from './physics';
 import { buildCartMesh, type Cart } from './cart';
 import { Person, type Palette } from './person';
 import type { ThrowTarget } from './crew';
@@ -8,18 +8,26 @@ export type RaceState = 'idle' | 'countdown' | 'running' | 'finished';
 
 export type RaceEvent =
   | { type: 'count'; text: string }
-  | { type: 'checkpoint'; index: number; total: number }
-  | { type: 'finish'; place: number; time: number; best: boolean };
+  | { type: 'lap'; lap: number; laps: number }
+  | { type: 'shove'; name: string }
+  | { type: 'finish'; place: number; racers: number; time: number; best: boolean };
 
-const CHECKPOINTS = 8;
+const LAPS = 2;
+const CHECKPOINTS = 8; // per lap
 const CHECKPOINT_RADIUS = 15;
 const CRUISE = 0.5; // rivals amble round the circuit when nobody is racing
 const STUN_TIME = 2.6;
-const BEST_KEY = 'shopping-cart-game.bestLap';
+const SHOVE_STUN = 1.1;
+const SHOVE_REACH = 1.15;
+const BEST_KEY = 'shopping-cart-game.bestRace';
+const START_PAD = { x: 7, z: 60, radius: 2.6 };
 
+// Each kid has a different pace and a lane they like. Lanes are metres left/right of the racing line.
 const RIVALS: { name: string; speed: number; offset: number; accent: number; palette: Palette }[] = [
-  { name: 'Toto', speed: 17, offset: 2.4, accent: 0x2f8f6b, palette: { top: 0xe8e2d0, legs: 0x23262e, skin: 0xc98e6a, hat: 0x2f8f6b } },
-  { name: 'Flor', speed: 18.5, offset: -2.4, accent: 0x6b4fb5, palette: { top: 0x23262e, legs: 0x6b4fb5, skin: 0xe9b999, hat: 0xd9a91a } },
+  { name: 'Toto', speed: 18.2, offset: 3.2, accent: 0x2f8f6b, palette: { top: 0xe8e2d0, legs: 0x23262e, skin: 0xc98e6a, hat: 0x2f8f6b } },
+  { name: 'Flor', speed: 20.6, offset: -1.6, accent: 0x6b4fb5, palette: { top: 0x23262e, legs: 0x6b4fb5, skin: 0xe9b999, hat: 0xd9a91a } },
+  { name: 'Rulo', speed: 19.2, offset: -3.2, accent: 0xd98a2b, palette: { top: 0x2f6fb5, legs: 0x3a3f52, skin: 0x9c6b4a, hat: 0xd8342c } },
+  { name: 'Mica', speed: 19.9, offset: 1.6, accent: 0xb5456f, palette: { top: 0xd9a91a, legs: 0x2a2c30, skin: 0xe9c0a0, hat: 0xb5456f } },
 ];
 
 const yAxis = new THREE.Vector3(0, 1, 0);
@@ -35,7 +43,8 @@ class Rival implements ThrowTarget {
   lapStart = 0;
   finished = false;
   stun = 0;
-  onStunned: (() => void) | null = null;
+  /** Extra sideways displacement from being shoved; eases back to the lane. */
+  private nudge = 0;
 
   private body: RAPIER.RigidBody;
   private group: THREE.Group;
@@ -54,7 +63,7 @@ class Rival implements ThrowTarget {
     private def: (typeof RIVALS)[number],
   ) {
     this.body = world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
-    world.createCollider(RAPIER.ColliderDesc.cuboid(0.3, 0.5, 0.5).setTranslation(0, 0.3, 0).setFriction(0.3), this.body);
+    world.createCollider(RAPIER.ColliderDesc.cuboid(0.3, 0.5, 0.5).setTranslation(0, 0.3, 0).setFriction(0.3).setCollisionGroups(RIVAL_GROUPS), this.body);
     this.group = buildCartMesh(def.accent).group;
     scene.add(this.group);
     this.person = new Person(scene, world, def.palette);
@@ -67,7 +76,7 @@ class Rival implements ThrowTarget {
     return this.def.name;
   }
 
-  /** Fraction of the current lap completed. */
+  /** Laps completed since the start, as a fraction. */
   get progress(): number {
     return (this.s - this.lapStart) / this.length;
   }
@@ -76,8 +85,9 @@ class Rival implements ThrowTarget {
     this.s = this.lapStart = s;
     this.speed = 0;
     this.stun = 0;
+    this.nudge = 0;
     this.finished = false;
-    this.y = this.curve.getPointAt((s % this.length) / this.length).y;
+    this.y = this.curve.getPointAt((((s % this.length) + this.length) % this.length) / this.length).y;
     this.advance(0, 0);
     const t = this.position;
     this.body.setTranslation({ x: t.x, y: t.y, z: t.z }, true);
@@ -86,8 +96,17 @@ class Rival implements ThrowTarget {
   hit(): { label: string; points: number } | null {
     if (this.stun > 0) return null;
     this.stun = STUN_TIME;
-    this.onStunned?.();
     return { label: `HIT ${this.def.name.toUpperCase()}`, points: 200 };
+  }
+
+  /** Barged by the player from one side: knocked off line and slowed for a moment. */
+  shove(fromX: number, fromZ: number): boolean {
+    if (this.stun > 0) return false;
+    this.stun = SHOVE_STUN;
+    // Which side of our heading the player is on decides which way we get pushed.
+    const side = (fromX - this.position.x) * this.velocity.z - (fromZ - this.position.z) * this.velocity.x;
+    this.nudge += side > 0 ? -1.4 : 1.4;
+    return true;
   }
 
   /** Move along the circuit. `pace` scales the top speed (0 = hold still). */
@@ -96,17 +115,19 @@ class Rival implements ThrowTarget {
     const tangent = this.curve.getTangentAt(u);
     const ahead = this.curve.getTangentAt((u + 7 / this.length) % 1);
     // Ease off for corners, and crawl while stunned.
-    const corner = Math.max(0.55, 1 - tangent.angleTo(ahead) * 0.8);
+    const corner = Math.max(0.65, 1 - tangent.angleTo(ahead) * 0.8);
     this.stun = Math.max(0, this.stun - dt);
-    const target = this.def.speed * pace * corner * (this.stun > 0 ? 0.2 : 1);
+    const target = this.def.speed * pace * corner * (this.stun > 0 ? 0.35 : 1);
+    this.nudge *= Math.max(0, 1 - dt * 0.9);
     this.speed += Math.max(-9 * dt, Math.min(5 * dt, target - this.speed));
     this.s += this.speed * dt;
 
     const point = this.curve.getPointAt(u);
     const flat = Math.hypot(tangent.x, tangent.z) || 1;
     const nx = tangent.z / flat, nz = -tangent.x / flat;
-    const x = point.x + nx * this.def.offset;
-    const z = point.z + nz * this.def.offset;
+    const lane = Math.max(-3.5, Math.min(3.5, this.def.offset + this.nudge));
+    const x = point.x + nx * lane;
+    const z = point.z + nz * lane;
     const floor = groundBelow(this.world, x, this.y + 1.6, z, 6);
     const prevY = this.y;
     this.y = floor ?? point.y;
@@ -134,25 +155,31 @@ class Rival implements ThrowTarget {
 }
 
 /**
- * One-lap race round the circuit against two rivals. Outside a race the rivals just
- * cruise the same loop, so there is always someone to throw things at.
+ * A race round the circuit against the other kids. Outside a race they just cruise the
+ * same loop, so there is always someone to shove or throw things at.
  */
 export class Race {
   state: RaceState = 'idle';
   time = 0;
+  /** Checkpoints passed so far, across all laps. */
   next = 0;
   best: number | null = null;
   events: RaceEvent[] = [];
   readonly rivals: Rival[];
-  readonly total = CHECKPOINTS;
+  readonly laps = LAPS;
 
   private curve: THREE.CatmullRomCurve3;
   private length: number;
   private checkpoints: THREE.Vector3[] = [];
   private marker: THREE.Group;
+  private pad: THREE.Mesh;
+  private padArmed = false;
   private timer = 0;
   private finishedRivals = 0;
+  private finalPlace = 1;
   private startYaw: number;
+  /** How far round the circuit the player is, in metres since the start. */
+  private playerS = 0;
 
   constructor(scene: THREE.Scene, world: RAPIER.World, private cart: Cart, circuit: THREE.Vector3[]) {
     this.curve = new THREE.CatmullRomCurve3(circuit, true, 'centripetal');
@@ -163,7 +190,7 @@ export class Race {
     this.startYaw = Math.atan2(tangent.x, tangent.z);
 
     this.rivals = RIVALS.map((def) => new Rival(scene, world, this.curve, this.length, def));
-    this.rivals.forEach((r, i) => r.placeAt(this.length * (0.3 + i * 0.35)));
+    this.rivals.forEach((r, i) => r.placeAt(this.length * (0.15 + i * 0.2)));
 
     // Beam of light marking the next checkpoint.
     this.marker = new THREE.Group();
@@ -176,6 +203,27 @@ export class Race {
     this.marker.add(beam, ring);
     this.marker.visible = false;
     scene.add(this.marker);
+
+    // Start pad: roll into it to line everyone up for a race.
+    this.pad = new THREE.Mesh(
+      new THREE.CylinderGeometry(START_PAD.radius, START_PAD.radius, 2.6, 28, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x58ffd0, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+    );
+    this.pad.position.set(START_PAD.x, 1.3, START_PAD.z);
+    scene.add(this.pad);
+    const flag = document.createElement('canvas');
+    flag.width = 256;
+    flag.height = 96;
+    const g = flag.getContext('2d')!;
+    g.fillStyle = '#58ffd0';
+    g.font = 'bold 72px Arial, Helvetica, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('RACE', 128, 52);
+    const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(flag), transparent: true, depthWrite: false }));
+    label.scale.set(4, 1.5, 1);
+    label.position.y = 2.4;
+    this.pad.add(label);
 
     try {
       const saved = Number(localStorage.getItem(BEST_KEY));
@@ -190,10 +238,19 @@ export class Race {
     return this.state === 'countdown';
   }
 
+  get racers(): number {
+    return this.rivals.length + 1;
+  }
+
+  /** Which lap the player is on, starting at 1. */
+  get lap(): number {
+    return Math.min(LAPS, Math.floor(this.next / CHECKPOINTS) + 1);
+  }
+
   /** The player's position in the race, 1 = leading. */
   get place(): number {
-    const mine = this.next / CHECKPOINTS;
-    return 1 + this.rivals.filter((r) => r.finished || r.progress > mine + 0.5 / CHECKPOINTS).length;
+    if (this.state === 'finished') return this.finalPlace;
+    return 1 + this.rivals.filter((r) => r.finished || r.s - r.lapStart > this.playerS + 1.5).length;
   }
 
   get targets(): ThrowTarget[] {
@@ -210,19 +267,29 @@ export class Race {
     const start = this.curve.getPointAt(0);
     this.cart.placeAt(start.x, start.y, start.z, this.startYaw);
     this.cart.addStamina(99); // everyone starts a race with a full pack
-    for (const r of this.rivals) r.placeAt(0);
+    // Two rows on the grid: the player is in the middle of the front row.
+    this.rivals.forEach((r, i) => r.placeAt(i < 2 ? 0 : -3.5));
     this.state = 'countdown';
     this.timer = 3;
     this.time = 0;
     this.next = 0;
+    this.playerS = 0;
     this.finishedRivals = 0;
+    this.padArmed = false;
     this.moveMarker();
     this.events.push({ type: 'count', text: '3' });
   }
 
   step(): void {
     const dt = FIXED_DT;
-    if (this.state === 'countdown') {
+    const p = this.cart.body.translation();
+
+    if (this.state === 'idle') {
+      // The pad only arms once you have rolled out of it, so a race does not restart under you.
+      const onPad = Math.hypot(p.x - START_PAD.x, p.z - START_PAD.z) < START_PAD.radius && Math.abs(p.y) < 1.5;
+      if (!onPad) this.padArmed = true;
+      else if (this.padArmed && this.cart.state !== 'crashed') this.toggle();
+    } else if (this.state === 'countdown') {
       const before = Math.ceil(this.timer);
       this.timer -= dt;
       const after = Math.ceil(this.timer);
@@ -231,21 +298,32 @@ export class Race {
     }
 
     const racing = this.state === 'running' || this.state === 'finished';
+    if (this.state === 'running') this.trackPlayer(p);
     for (const r of this.rivals) {
-      r.advance(dt, this.state === 'countdown' ? 0 : racing && !r.finished ? 1 : CRUISE);
-      if (racing && !r.finished && r.progress >= 1) {
+      let pace = this.state === 'countdown' ? 0 : racing && !r.finished ? 1 : CRUISE;
+      if (this.state === 'running' && !r.finished) {
+        // Keep it a race: kids well ahead ease off a little, kids well behind dig in.
+        const gap = r.s - r.lapStart - this.playerS;
+        pace *= 1 - Math.max(-0.14, Math.min(0.14, gap / 300));
+      }
+      r.advance(dt, pace);
+      if (racing && !r.finished && r.progress >= LAPS) {
         r.finished = true;
         if (this.state === 'running') this.finishedRivals++;
+      }
+      // Barge into a kid and they get knocked off line instead of you both going down.
+      if (this.state !== 'countdown' && this.cart.state !== 'crashed' && this.cart.speed > 4 &&
+        Math.hypot(p.x - r.position.x, p.y - r.position.y, p.z - r.position.z) < SHOVE_REACH && r.shove(p.x, p.z)) {
+        this.events.push({ type: 'shove', name: r.name });
       }
     }
 
     if (this.state === 'running') {
       this.time += dt;
-      const p = this.cart.body.translation();
-      const c = this.checkpoints[this.next];
+      const c = this.checkpoints[this.next % CHECKPOINTS];
       if (Math.hypot(p.x - c.x, p.z - c.z) < CHECKPOINT_RADIUS && Math.abs(p.y - c.y) < 4) {
         this.next++;
-        if (this.next >= CHECKPOINTS) {
+        if (this.next >= CHECKPOINTS * LAPS) {
           const isBest = this.best === null || this.time < this.best;
           if (isBest) {
             this.best = this.time;
@@ -255,12 +333,13 @@ export class Race {
               // See constructor.
             }
           }
-          this.events.push({ type: 'finish', place: 1 + this.finishedRivals, time: this.time, best: isBest });
+          this.finalPlace = 1 + this.finishedRivals;
+          this.events.push({ type: 'finish', place: this.finalPlace, racers: this.racers, time: this.time, best: isBest });
           this.state = 'finished';
           this.timer = 5;
           this.marker.visible = false;
         } else {
-          this.events.push({ type: 'checkpoint', index: this.next, total: CHECKPOINTS });
+          if (this.next % CHECKPOINTS === 0) this.events.push({ type: 'lap', lap: this.lap, laps: LAPS });
           this.moveMarker();
         }
       }
@@ -273,10 +352,26 @@ export class Race {
   update(dt: number, time: number): void {
     for (const r of this.rivals) r.update(dt, time);
     if (this.marker.visible) this.marker.children[0].rotation.y = time;
+    this.pad.visible = this.state === 'idle';
+    this.pad.rotation.y = time * 0.6;
+  }
+
+  /** Slide the player's marker forward along the racing line to the point nearest the cart. */
+  private trackPlayer(p: { x: number; y: number; z: number }): void {
+    const at = (s: number) => this.curve.getPointAt((((s % this.length) + this.length) % this.length) / this.length);
+    let here = at(this.playerS);
+    let best = Math.hypot(here.x - p.x, here.y - p.y, here.z - p.z);
+    for (let i = 0; i < 12; i++) {
+      here = at(this.playerS + 1);
+      const d = Math.hypot(here.x - p.x, here.y - p.y, here.z - p.z);
+      if (d >= best) break;
+      best = d;
+      this.playerS += 1;
+    }
   }
 
   private moveMarker(): void {
-    this.marker.position.copy(this.checkpoints[this.next]);
+    this.marker.position.copy(this.checkpoints[this.next % CHECKPOINTS]);
     this.marker.visible = true;
   }
 }

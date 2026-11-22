@@ -22,7 +22,7 @@ Then open the link Vite prints.
 | Jump | `Space` | `A` | HOP |
 | Wheelie (riding) / brake (on foot) | `S` / `↓` | stick back | drag down |
 | Passenger throws a can | `F` | `B` or `RB` | THROW |
-| Start or abandon a race | `Enter` | Start | RACE |
+| Start or abandon a race | `Enter`, or roll into the green ring | Start | RACE |
 | Get back up early after a bail | `R` | `Y` | ↺ |
 
 Hold go and the character runs with the cart, jumps on by themselves once it is moving fast enough, and keeps kicking it along. The handling is arcade, not realistic.
@@ -35,7 +35,7 @@ Hold go and the character runs with the cart, jumps on by themselves once it is 
 - **Air:** jump anywhere, or use the kicker ramps, funbox and big launch ramp in the south-west corner. Steer in the air to spin; 180s and 360s score.
 - **Kerb hop:** jump onto or off a kerb island for a bonus.
 - **Crew:** teens hang around the lot. Roll past one slowly and they hop in the basket, then throw cans at rival riders (slows them down) and traffic cones.
-- **Race:** one lap against two rivals, north up the centre lane, down through the underground level and back. Best lap is saved in the browser.
+- **Race:** roll into the green RACE ring by the start (or press `Enter`) for two laps against four other kids: up the centre lane, down through the underground level and back. Each kid has their own pace and lane, and the pack stays close. Barge into one to knock them off line, or have your passenger hit them with a can. Best time is saved in the browser.
 - **Bails:** tip over or slam into something solid and everyone on the cart ragdolls. You are stood back up after a second.
 
 ## Look
