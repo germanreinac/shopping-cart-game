@@ -13,7 +13,29 @@ import { buildParkingLot } from './scene/parkingLot';
 
 const SPARE_COLOURS = [0x2f6fb5, 0x2f8f6b, 0xd9a91a, 0x6b4fb5, 0xb5456f, 0x9aa3ad, 0xd98a2b, 0x2f6fb5];
 
+declare const __BUILD__: string;
+
+/**
+ * Phones hang on to an old copy of the page for a while after a deploy. On load, ask the
+ * server for the page afresh; if it points at a different script than the one running,
+ * reload past the cache.
+ */
+async function ensureLatest(): Promise<void> {
+  if (!import.meta.env.PROD || location.search.includes('fresh=')) return;
+  try {
+    const html = await (await fetch(`./?fresh=${Date.now()}`, { cache: 'no-store' })).text();
+    const latest = /assets\/index-[\w-]+\.js/.exec(html)?.[0];
+    const running = /assets\/index-[\w-]+\.js/.exec(import.meta.url)?.[0];
+    if (latest && running && latest !== running) location.replace(`./?fresh=${Date.now()}`);
+  } catch {
+    // Offline or blocked: carry on with what we have.
+  }
+}
+
 async function start(): Promise<void> {
+  void ensureLatest();
+  const stamp = document.getElementById('build');
+  if (stamp) stamp.textContent = `build ${__BUILD__}`;
   const world = await initPhysics();
 
   // Rendered small and scaled up with hard pixels: the lo-fi, grimy half of the look.
@@ -251,7 +273,7 @@ async function start(): Promise<void> {
     // On a short, wide screen (a phone held sideways) the rider ends up tiny, so the camera
     // sits closer and lower, and the view is narrowed to keep the same width of world in frame.
     const short = Math.max(0, Math.min(1, (620 - window.innerHeight) / 240));
-    const close = 1 - short * 0.2;
+    const close = 1 - short * 0.3;
     // The camera is locked to a fixed distance behind the rider. It used to chase its
     // target, which let the rider run away from it at speed; now only the direction it
     // looks from (heading) and its height are smoothed, so the rider stays the same size.
