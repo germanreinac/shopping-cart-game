@@ -7,6 +7,7 @@ import { Crew } from './crew';
 import { Race } from './race';
 import { Pickups } from './pickups';
 import { LightPool } from './lights';
+import { Fx } from './fx';
 import { Hud, formatTime, ORDINAL } from './hud';
 import { buildParkingLot } from './scene/parkingLot';
 
@@ -41,6 +42,8 @@ async function start(): Promise<void> {
   const pickups = new Pickups(scene, lot.pickupSpots);
   const input = new Input();
   const hud = new Hud(TUNE.staminaMax);
+  const fx = new Fx(scene);
+  const wheel = new THREE.Vector3();
 
   // Soft blob under the cart so it sits on the ground without real shadows.
   const blob = new THREE.Mesh(
@@ -56,6 +59,7 @@ async function start(): Promise<void> {
   let score = 0;
   let shake = 0;
   let camRoll = 0;
+  let fovKick = 0;
   const heading = new THREE.Vector3(Math.sin(lot.spawn.yaw), 0, Math.cos(lot.spawn.yaw));
   const focus = new THREE.Vector3();
   const camGoal = new THREE.Vector3();
@@ -76,9 +80,21 @@ async function start(): Promise<void> {
         case 'trick':
           award(ev.label, ev.points);
           break;
-        case 'land':
+        case 'land': {
           shake = Math.max(shake, 0.12 + ev.strength * 0.3);
+          const p = cart.body.translation();
+          fx.emit(p.x, cart.groundY + 0.1, p.z, 0, 0.6, 0, 4 + ev.strength * 4, 0xcfd2ea, 14 + Math.round(ev.strength * 16), 0.45);
           break;
+        }
+        case 'boost': {
+          // Fired out of a drift: punch the camera and leave a burst behind.
+          shake = Math.max(shake, 0.15 + ev.strength * 0.2);
+          fovKick = 5 + ev.strength * 7;
+          const p = cart.body.translation();
+          fx.emit(p.x, p.y, p.z, 0, 1, 0, 6, 0xffd166, 24, 0.5);
+          hud.popup('BOOST', 'info');
+          break;
+        }
         case 'crash':
           rider.bail(ev.velocity);
           crew.bail(ev.velocity);
@@ -167,9 +183,10 @@ async function start(): Promise<void> {
     camera.lookAt(lookAt);
     camRoll += (-cart.lean * 0.07 * speedK - camRoll) * Math.min(1, dt * 4);
     camera.rotateZ(camRoll + (Math.random() - 0.5) * s * 0.15);
-    const fov = 62 + speedK * 20;
+    fovKick = Math.max(0, fovKick - dt * 14);
+    const fov = 62 + speedK * 20 + fovKick;
     if (Math.abs(camera.fov - fov) > 0.05) {
-      camera.fov += (fov - camera.fov) * Math.min(1, dt * 3);
+      camera.fov += (fov - camera.fov) * Math.min(1, dt * 6);
       camera.updateProjectionMatrix();
     }
   };
@@ -196,6 +213,16 @@ async function start(): Promise<void> {
     crew.update(dt, elapsed);
     race.update(dt, elapsed);
     lot.update(elapsed);
+
+    // Sparks off the back wheels while drifting: white, then orange once the boost is charged.
+    if (cart.drifting) {
+      const lv = cart.body.linvel();
+      for (const sx of [0.26, -0.26]) {
+        wheel.set(sx, -0.22, -0.38).applyMatrix4(cart.group.matrixWorld);
+        fx.emit(wheel.x, wheel.y, wheel.z, lv.x * 0.25, 1.2, lv.z * 0.25, 2.5, cart.pendingPoints > 60 ? 0xff8a2a : 0xf4efe6, 2, 0.35);
+      }
+    }
+    fx.update(dt);
     if (pickups.update(dt, elapsed, cart) > 0) hud.popup('Cigarettes +3', 'info');
 
     // Knocked-over cones score once, however they went down.

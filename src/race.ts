@@ -18,8 +18,8 @@ const STUN_TIME = 2.6;
 const BEST_KEY = 'shopping-cart-game.bestLap';
 
 const RIVALS: { name: string; speed: number; offset: number; accent: number; palette: Palette }[] = [
-  { name: 'Toto', speed: 14.2, offset: 2.4, accent: 0x2f8f6b, palette: { top: 0xe8e2d0, legs: 0x23262e, skin: 0xc98e6a, hat: 0x2f8f6b } },
-  { name: 'Flor', speed: 15.6, offset: -2.4, accent: 0x6b4fb5, palette: { top: 0x23262e, legs: 0x6b4fb5, skin: 0xe9b999, hat: 0xd9a91a } },
+  { name: 'Toto', speed: 17, offset: 2.4, accent: 0x2f8f6b, palette: { top: 0xe8e2d0, legs: 0x23262e, skin: 0xc98e6a, hat: 0x2f8f6b } },
+  { name: 'Flor', speed: 18.5, offset: -2.4, accent: 0x6b4fb5, palette: { top: 0x23262e, legs: 0x6b4fb5, skin: 0xe9b999, hat: 0xd9a91a } },
 ];
 
 const yAxis = new THREE.Vector3(0, 1, 0);

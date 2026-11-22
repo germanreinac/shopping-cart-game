@@ -28,8 +28,10 @@ Then open the link Vite prints.
 Hold go and the character runs with the cart, jumps on by themselves once it is moving fast enough, and keeps kicking it along. The handling is arcade, not realistic.
 
 - **Cigarettes are stamina.** Going faster than cruising speed burns them. They come back slowly on their own; packs around the lot give three at once.
-- **Drift:** steer hard at speed and the back end slides. Points build while you hold the slide and bank when you straighten up.
+- **Steering** is kart-style: the cart goes where it points, tighter at low speed. Tap for a nudge, hold for a full turn.
+- **Drift:** hold a hard turn at speed and after a moment the back steps out and the cart turns tighter, throwing sparks. Points build while you hold it; let go and you get a speed boost out of the corner, bigger the longer you held.
 - **Wheelie:** hold back to lift the nose and let go to bank the points.
+- **Jump:** tap for a short hop, hold for a full one. Pressing just before you land still counts, so hops chain.
 - **Air:** jump anywhere, or use the kicker ramps, funbox and big launch ramp in the south-west corner. Steer in the air to spin; 180s and 360s score.
 - **Kerb hop:** jump onto or off a kerb island for a bonus.
 - **Crew:** teens hang around the lot. Roll past one slowly and they hop in the basket, then throw cans at rival riders (slows them down) and traffic cones.
@@ -51,6 +53,7 @@ src/
   crew.ts            teens who hop in, and can throwing
   race.ts            circuit, rival riders, checkpoints, lap timing
   pickups.ts         cigarette packs
+  fx.ts              particles: drift sparks, landing dust, boost bursts
   lights.ts          pool of real lights moved to the lamps nearest the camera
   style.ts           toon materials, outlines, sky and skyline
   input.ts           keyboard, gamepad, touch

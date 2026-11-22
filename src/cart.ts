@@ -9,6 +9,7 @@ export type CartEvent =
   | { type: 'hopOn' }
   | { type: 'hopOff' }
   | { type: 'tooSlow' }
+  | { type: 'boost'; strength: number }
   | { type: 'land'; strength: number }
   | { type: 'trick'; label: string; points: number }
   | { type: 'crash'; velocity: THREE.Vector3 };
@@ -27,26 +28,40 @@ export const TUNE = {
   remountSpeed: 2.5, // riding slower than this with push held, you step off and run
   pushBrake: 6.0, // pulling back on the handle while on foot
   pushCoast: 1.6, // jogging to a stop when you let go of push
-  rideDrag: 0.4, // rolling resistance while riding (m/s²)
+  rideDrag: 0.7, // rolling resistance while riding (m/s²)
   rideDragQuad: 0.004, // extra drag that grows with speed²
-  yawTorque: 330, // steering strength
-  yawDamping: 110,
+  steerAttack: 9, // how fast the steering eases in (per second)
+  steerRelease: 14, // and back to centre
+  turnRateSlow: 2.7, // rad/s of turning at walking pace
+  turnRateFast: 1.35, // rad/s of turning at top speed
+  turnSnap: 12, // how quickly the cart reaches the turn rate you asked for
+  grip: 11, // how fast sideways sliding is killed (per second); lower = looser
+  turnDrag: 1.5, // m/s² lost in a hard corner
+  revertRate: 5, // rad/s the cart swings round when it is rolling backwards
+  driftMinSpeed: 8, // need this much speed to start a drift
+  driftDelay: 0.35, // seconds of full lock before the back steps out
+  driftTurn: 1.45, // drifting turns this much tighter
+  driftGrip: 2.6, // grip while drifting: low, so the cart slides
+  driftDrag: 2.2, // m/s² lost while sliding
+  driftBoostMin: 2, // m/s kick out of a short drift
+  driftBoostMax: 6, // and out of a long one (two seconds or more)
   airYawTorque: 150, // spinning in the air
   airYawDamping: 18,
   airLevel: 60, // how hard the rider keeps the cart level in the air
   antiRoll: 900, // keeps all four wheels down in hard corners
-  driftCatch: 600, // counter-torque that stops a drift becoming a spin-out
-  driftCatchAngle: 0.75, // rad of slip before the catch kicks in
-  rearGrip: 1.3, // sideways grip of the back wheels; lower = more drift
   wheelieRaiseRate: 0.9, // rad/s the nose climbs while you hold back
   wheelieDropRate: 1.8, // rad/s it comes down when you let go
   wheelieMaxPitch: 0.8, // rad: the nose stops here, so a held wheelie never loops out
-  hopSpeed: 6, // vertical take-off speed of a hop
+  hopSpeed: 6.6, // vertical take-off speed of a full hop
+  hopCutGravity: 16, // extra gravity while rising if you let go of jump early (short hop)
+  fallGravity: 5, // extra gravity on the way down, so jumps feel snappy not floaty
+  jumpBuffer: 0.14, // seconds a jump press is remembered before landing
   tipCrashUp: 0.45, // cart "up" · world up below this = tipped over
   slamCrashDv: 7, // horizontal speed lost in one step = hit something solid
   recoverTime: 1, // seconds on the floor before you are stood back up automatically
 };
 
+const YAW_INERTIA = 8; // matches the collider's mass properties below
 const WHEEL_RADIUS = 0.08;
 const SUSPENSION_REST = 0.12;
 // Front-left, front-right, rear-left, rear-right (forward = +Z, left = +X).
@@ -175,8 +190,10 @@ export class Cart {
   fwdSpeed = 0;
   /** Nose-up pitch in radians. */
   pitch = 0;
-  /** Smoothed steer input, for the rider's lean animation. */
+  /** Eased steer input, -1..1. Drives the turn rate and the lean of cart and rider. */
   lean = 0;
+  /** True while in a held slide. */
+  drifting = false;
   grounded = 0;
   /** Points building up in the trick currently being held, and what it is. */
   pendingPoints = 0;
@@ -201,7 +218,11 @@ export class Cart {
   private airYaw = 0;
   private driftTime = 0;
   private driftPoints = 0;
-  private driftGrace = 0;
+  private driftCharge = 0;
+  private visualRoll = 0;
+  private driftDir = 0;
+  private jumpBuffer = 0;
+  private hopping = false;
   private wheeliePoints = 0;
   private lastYaw = 0;
   private stillTime = 0;
@@ -246,8 +267,7 @@ export class Cart {
       v.setWheelMaxSuspensionTravel(i, 0.1);
       v.setWheelMaxSuspensionForce(i, 6000);
       // Front casters swivel freely (almost no sideways grip); rear wheels are fixed.
-      const isFront = i < 2;
-      v.setWheelFrictionSlip(i, isFront ? 0.12 : TUNE.rearGrip);
+      v.setWheelFrictionSlip(i, 0.02); // tyres only hold the cart up; grip is handled in step()
       v.setWheelSideFrictionStiffness(i, 1);
     });
 
@@ -280,8 +300,10 @@ export class Cart {
     const braking = this.state === 'pushing' && ctl.back > 0.1;
     if (ctl.push && onWheels && !braking) {
       const top = this.stamina > 0 ? TUNE.sprintSpeed : TUNE.cruiseSpeed;
-      const accel = TUNE.accel * Math.max(-0.2, Math.min(1, (top - this.fwdSpeed) / 3));
-      if (this.fwdSpeed > TUNE.cruiseSpeed - 0.5 && this.stamina > 0) {
+      // Measured on total speed, so sliding sideways in a drift is not a way to exceed top speed.
+      const going = this.fwdSpeed >= 0 ? this.speed : this.fwdSpeed;
+      const accel = TUNE.accel * Math.max(-0.2, Math.min(1, (top - going) / 3));
+      if (going > TUNE.cruiseSpeed - 0.5 && this.stamina > 0) {
         this.sprinting = true;
         this.stamina = Math.max(0, this.stamina - TUNE.sprintDrain * dt);
       }
@@ -310,8 +332,12 @@ export class Cart {
         this.state = 'pushing';
         this.events.push({ type: 'hopOff' });
       }
-      if (ctl.jump && onWheels) {
-        b.applyImpulse({ x: 0, y: m * TUNE.hopSpeed, z: 0 }, true);
+      // Hop, with a short buffer so a press just before landing still counts.
+      this.jumpBuffer = ctl.jump ? TUNE.jumpBuffer : this.jumpBuffer - dt;
+      if (this.jumpBuffer > 0 && onWheels && vel.y < 2) {
+        this.jumpBuffer = 0;
+        this.hopping = true;
+        b.applyImpulse({ x: 0, y: m * (TUNE.hopSpeed - vel.y), z: 0 }, true);
       }
       // Wheelie: hold back to lift the nose, let go to drop it and bank the points.
       if (ctl.back > 0.1 && this.grounded >= 1) {
@@ -333,19 +359,42 @@ export class Cart {
       b.applyImpulse({ x: (-vel.x / this.speed) * m * decel * dt, y: 0, z: (-vel.z / this.speed) * m * decel * dt }, true);
     }
 
-    // Steering: twist the cart. Rear wheels grip, front casters follow.
+    // Ease the steering in and out so a tapped key is a nudge and a held key is a full turn.
+    const easing = (ctl.steer === 0 || ctl.steer * this.lean < 0 ? TUNE.steerRelease : TUNE.steerAttack) * dt;
+    this.lean += Math.max(-easing, Math.min(easing, ctl.steer - this.lean));
+
     if (this.state !== 'crashed') {
       const av = b.angvel();
-      if (this.grounded >= 1) {
-        let torque = -ctl.steer * TUNE.yawTorque - av.y * TUNE.yawDamping;
-        // Drift catch: past a certain slip angle, pull the nose back toward the direction of travel.
-        const over = Math.abs(this.slip) - TUNE.driftCatchAngle;
-        if (over > 0 && Math.abs(this.slip) < 2.2 && this.speed > 4) torque += Math.sign(this.slip) * over * TUNE.driftCatch;
-        b.applyTorqueImpulse({ x: 0, y: torque * dt, z: 0 }, true);
+      if (this.grounded >= 2) {
+        this.updateDrift(ctl, m);
+
+        // Kart-style steering: the cart turns at the rate you ask for, tighter at low speed.
+        const k = Math.min(1, this.speed / TUNE.sprintSpeed);
+        let want = -this.lean * (TUNE.turnRateSlow + (TUNE.turnRateFast - TUNE.turnRateSlow) * k);
+        if (this.drifting) want *= TUNE.driftTurn;
+        // Rolling sideways or backwards (after a spin): swing the nose round to face the way you are going.
+        else if (Math.abs(this.slip) > 1.1 && this.speed > 3) want += Math.sign(this.slip) * TUNE.revertRate;
+        b.applyTorqueImpulse({ x: 0, y: YAW_INERTIA * (want - av.y) * Math.min(1, TUNE.turnSnap * dt), z: 0 }, true);
+
         // Anti-roll: not realistic, but it keeps hard corners fun instead of fatal.
         const roll = -(side.y * TUNE.antiRoll + (av.x * fwd.x + av.y * fwd.y + av.z * fwd.z) * 120) * dt;
         b.applyTorqueImpulse({ x: fwd.x * roll, y: fwd.y * roll, z: fwd.z * roll }, true);
+
+        // Grip: bleed off sideways speed and turn most of it back into forward speed, so the
+        // cart goes where it points without stalling in corners. Drifting just uses less grip.
+        const lx = fwdFlat.z, lz = -fwdFlat.x;
+        const vf = vel.x * fwdFlat.x + vel.z * fwdFlat.z;
+        const vl = vel.x * lx + vel.z * lz;
+        const sp = Math.hypot(vf, vl);
+        if (sp > 0.05) {
+          const nl = vl * Math.max(0, 1 - (this.drifting ? TUNE.driftGrip : TUNE.grip) * dt);
+          const scrub = (this.drifting ? TUNE.driftDrag : TUNE.turnDrag) * Math.min(1, Math.abs(vl) / sp) * dt;
+          const keep = Math.max(0, sp - scrub);
+          const nf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, keep * keep - nl * nl));
+          b.applyImpulse({ x: m * ((nf - vf) * fwdFlat.x + (nl - vl) * lx), y: 0, z: m * ((nf - vf) * fwdFlat.z + (nl - vl) * lz) }, true);
+        }
       } else {
+        if (this.drifting) this.endDrift(m, false);
         // In the air: spin freely, and keep the cart roughly level so jumps are landable.
         const spin = -ctl.steer * TUNE.airYawTorque - av.y * TUNE.airYawDamping;
         tmp.set(-up.z, 0, up.x).multiplyScalar(TUNE.airLevel); // up × worldUp
@@ -354,14 +403,22 @@ export class Cart {
           true,
         );
         this.airYaw += av.y * dt;
+        // Snappier jumps: fall faster than you rise, and a tapped hop is a short hop.
+        if (this.grounded === 0) {
+          const extra = vel.y < 0 ? TUNE.fallGravity : this.hopping && !ctl.jumpHeld ? TUNE.hopCutGravity : 0;
+          b.applyImpulse({ x: 0, y: -m * extra * dt, z: 0 }, true);
+        }
       }
-      this.lean += (ctl.steer - this.lean) * Math.min(1, dt * 8);
+    } else if (this.drifting) {
+      this.endDrift(m, false);
     }
 
     // Catch your breath (slowly) whenever you are not sprinting.
     if (!this.sprinting) this.stamina = Math.min(TUNE.staminaMax, this.stamina + TUNE.staminaRegen * dt);
 
-    this.prevVel.copy(vel);
+    // Remember the speed after our own pushes and boosts, so only real impacts read as a slam.
+    const after = b.linvel();
+    this.prevVel.set(after.x, after.y, after.z);
     this.vehicle.updateVehicle(dt, undefined, WHEEL_RAY_GROUPS);
   }
 
@@ -397,6 +454,7 @@ export class Cart {
           }
         }
       }
+      if (this.airTime > 0) this.hopping = false;
       this.airTime = 0;
       this.airYaw = 0;
       this.groundY = this.body.translation().y - 0.27;
@@ -418,27 +476,6 @@ export class Cart {
         this.wheelieTime = 0;
         this.wheeliePoints = 0;
         this.pendingPoints = 0;
-      }
-    }
-
-    // Drift: sliding sideways at speed. Points bank when you straighten out.
-    const sliding = this.state === 'riding' && this.grounded >= 3 && this.speed > 5.5 && Math.abs(this.slip) > 0.3 && Math.abs(this.slip) < 1.7;
-    if (sliding) {
-      this.driftTime += dt;
-      this.driftGrace = 0.3;
-      this.driftPoints += dt * this.speed * Math.abs(this.slip) * 14;
-      if (this.wheelieTime === 0) {
-        this.pendingPoints = Math.round(this.driftPoints / 10) * 10;
-        this.pendingLabel = 'DRIFT';
-      }
-    } else if (this.driftTime > 0) {
-      this.driftGrace -= dt;
-      if (this.driftGrace <= 0) {
-        const points = Math.round(this.driftPoints / 10) * 10;
-        if (this.state === 'riding' && this.driftTime > 0.5 && points > 0) this.events.push({ type: 'trick', label: 'DRIFT', points });
-        this.driftTime = 0;
-        this.driftPoints = 0;
-        if (this.wheelieTime === 0) this.pendingPoints = 0;
       }
     }
 
@@ -465,6 +502,49 @@ export class Cart {
         this.events.push({ type: 'crash', velocity: this.prevVel.clone() });
       }
     }
+  }
+
+  /**
+   * Drift: hold a hard turn at speed and the back steps out. The longer you hold the slide
+   * the more it scores, and letting go fires you out of the corner with a boost.
+   */
+  private updateDrift(ctl: Controls, m: number): void {
+    const dt = FIXED_DT;
+    const hard = this.state === 'riding' && Math.abs(this.lean) > 0.85 && Math.abs(ctl.steer) > 0.5 && this.speed > TUNE.driftMinSpeed;
+    if (!this.drifting) {
+      this.driftCharge = hard ? this.driftCharge + dt : 0;
+      if (this.driftCharge > TUNE.driftDelay) {
+        this.drifting = true;
+        this.driftDir = Math.sign(this.lean);
+        this.driftTime = 0;
+        this.driftPoints = 0;
+      }
+      return;
+    }
+    this.driftTime += dt;
+    this.driftPoints += dt * this.speed * 9;
+    if (this.wheelieTime === 0) {
+      this.pendingPoints = Math.round(this.driftPoints / 10) * 10;
+      this.pendingLabel = 'DRIFT';
+    }
+    const released = Math.abs(ctl.steer) < 0.3 || ctl.steer * this.driftDir < 0;
+    if (released || this.speed < TUNE.driftMinSpeed * 0.6 || this.state !== 'riding') this.endDrift(m, released);
+  }
+
+  private endDrift(m: number, clean: boolean): void {
+    const points = Math.round(this.driftPoints / 10) * 10;
+    if (clean && this.driftTime > 0.5) {
+      const strength = Math.min(1, this.driftTime / 2);
+      const kick = TUNE.driftBoostMin + (TUNE.driftBoostMax - TUNE.driftBoostMin) * strength;
+      this.body.applyImpulse({ x: fwdFlat.x * m * kick, y: 0, z: fwdFlat.z * m * kick }, true);
+      this.events.push({ type: 'boost', strength });
+      if (points > 0) this.events.push({ type: 'trick', label: 'DRIFT', points });
+    }
+    this.drifting = false;
+    this.driftCharge = 0;
+    this.driftTime = 0;
+    this.driftPoints = 0;
+    if (this.wheelieTime === 0) this.pendingPoints = 0;
   }
 
   /** After a bail, get back up on your own once the dust settles. */
@@ -510,6 +590,8 @@ export class Cart {
   }
 
   private clearTrick(): void {
+    this.drifting = false;
+    this.driftCharge = 0;
     this.driftTime = 0;
     this.driftPoints = 0;
     this.airYaw = 0;
@@ -525,6 +607,10 @@ export class Cart {
     const r = this.body.rotation();
     this.group.position.set(t.x, t.y, t.z);
     this.group.quaternion.set(r.x, r.y, r.z, r.w);
+    // Lean the model into corners (the physics body stays flat). Sells the weight of the turn.
+    const tilt = this.lean * Math.min(1, this.speed / 10) * (this.drifting ? 0.22 : 0.12);
+    this.visualRoll += (tilt - this.visualRoll) * 0.25;
+    this.group.quaternion.multiply(q.setFromAxisAngle(tmp.set(0, 0, 1), this.visualRoll));
     for (let i = 0; i < 4; i++) {
       const len = this.vehicle.wheelSuspensionLength(i) ?? SUSPENSION_REST;
       const wheel = this.wheelMeshes[i];
