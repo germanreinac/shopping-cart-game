@@ -4,10 +4,15 @@ import { RAPIER, addStaticBox } from '../physics';
 import type { Rail } from '../cart';
 import type { LightPool } from '../lights';
 
+/** Something that scores once when knocked over: a traffic cone, or a box in a shop display. */
 export interface Cone {
   body: RAPIER.RigidBody;
   mesh: THREE.Object3D;
   tipped: boolean;
+  /** Boxes count as knocked once they have moved from here, rather than when they tilt. */
+  home?: THREE.Vector3;
+  label?: string;
+  points?: number;
 }
 
 export interface ParkingLot {
@@ -15,7 +20,7 @@ export interface ParkingLot {
   kerbHandles: Set<number>;
   spawn: { x: number; z: number; yaw: number };
   /** Half-size of the playable area. */
-  bounds: { x: number; z: number };
+  bounds: { x: number; z: number; north: number };
   /** Closed loop of points the race (and the rival teens) follow, through the underground level. */
   circuit: THREE.Vector3[];
   /** Where teens hang around waiting to hop in your cart. */
@@ -33,6 +38,7 @@ export interface ParkingLot {
 
 const LOT_X = 90;
 const LOT_Z = 90;
+const STORE_DEPTH = 62; // how far the supermarket runs back from its front wall
 const KERB_HEIGHT = 0.14;
 const SODIUM = 0xffd28a; // pale, warm lamp light
 const TUBE = 0xd6ffe6;
@@ -447,6 +453,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
     { x: BAY_X, y: 0, z: BAY_Z - 1.2, yaw: 0 }, { x: BAY_X, y: 0, z: BAY_Z, yaw: 0 }, { x: BAY_X, y: 0, z: BAY_Z + 1.2, yaw: 0 },
     { x: -30, y: 0, z: 40, yaw: -1.2 }, { x: 62, y: 0, z: -57, yaw: 0.4 }, { x: 60, y: G, z: 12, yaw: 2.2 },
     { x: -70, y: 0, z: -72, yaw: 1.9 }, { x: 30, y: 0, z: 76, yaw: -0.6 },
+    { x: -66, y: 0, z: -98, yaw: 1.57 }, { x: 74, y: 0, z: -146, yaw: -1.57 },
   ];
 
   // ---- Rails to grind: hop onto one while moving along it. ----
@@ -500,7 +507,136 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
 
   // ---- Supermarket ----
   const storeZ = -LOT_Z;
-  solid(0, 5.5, storeZ - 7, LOT_X + 1, 5.5, 7, toon({ color: 0x16222e, roughness: 0.9 }), 0.3);
+  const storeMat = toon({ color: 0x16222e });
+  // The shop is closed, but it is a real room you can get into. The front wall has one gap:
+  // a staff door left ajar at the far west end, under the NO CARTS tag, behind a skip.
+  const DOOR = { x0: -81.2, x1: -77.6, top: 2.9 };
+  const backZ = storeZ - 1 - STORE_DEPTH;
+  const midZ = (storeZ - 1 + backZ) / 2;
+  solid((-LOT_X - 1 + DOOR.x0) / 2, 5.5, storeZ - 0.5, (DOOR.x0 + LOT_X + 1) / 2, 5.5, 0.5, storeMat, 0.3);
+  solid((DOOR.x1 + LOT_X + 1) / 2, 5.5, storeZ - 0.5, (LOT_X + 1 - DOOR.x1) / 2, 5.5, 0.5, storeMat, 0.3);
+  solid((DOOR.x0 + DOOR.x1) / 2, (DOOR.top + 11) / 2, storeZ - 0.5, (DOOR.x1 - DOOR.x0) / 2, (11 - DOOR.top) / 2, 0.5, storeMat, 0.3);
+  solid(-LOT_X - 0.5, 5.5, midZ, 0.5, 5.5, STORE_DEPTH / 2 + 1, storeMat, 0.3);
+  solid(LOT_X + 0.5, 5.5, midZ, 0.5, 5.5, STORE_DEPTH / 2 + 1, storeMat, 0.3);
+  solid(0, 5.5, backZ - 0.5, LOT_X + 1, 5.5, 0.5, storeMat, 0.3);
+  const storeRoof = new THREE.Mesh(new THREE.BoxGeometry(LOT_X * 2 + 2, 0.5, STORE_DEPTH + 2), storeMat);
+  storeRoof.position.set(0, 10.75, midZ);
+  scene.add(storeRoof);
+  addStaticBox(world, 0, -0.25, midZ, LOT_X + 1, 0.25, STORE_DEPTH / 2 + 1, 0.9);
+  lights.storeZ = storeZ - 1;
+
+  // The door leaf, propped open, and a skip parked half across it.
+  const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.08, DOOR.top - 0.1, 1.7), toon({ color: 0x2a3d4a }));
+  leaf.position.set(DOOR.x0 + 0.15, DOOR.top / 2, storeZ + 0.8);
+  leaf.rotation.y = 0.25;
+  scene.add(leaf);
+  solid(-74.6, 0.75, storeZ + 1.6, 1.7, 0.75, 1.0, toon({ color: 0x2f5a44 }), 0.4);
+  solid(-74.6, 1.56, storeZ + 1.6, 1.8, 0.06, 1.1, toon({ color: 0x1f3f30 }), 0.4);
+
+  // ---- Inside: long polished aisles, dead tills, and a wall of fridges still humming. ----
+  const tileC = document.createElement('canvas');
+  tileC.width = tileC.height = 64;
+  const tg = tileC.getContext('2d')!;
+  tg.fillStyle = '#ffffff';
+  tg.fillRect(0, 0, 64, 64);
+  tg.fillStyle = '#cfd8dc';
+  tg.fillRect(0, 0, 32, 32);
+  tg.fillRect(32, 32, 32, 32);
+  const tileTex = new THREE.CanvasTexture(tileC);
+  tileTex.wrapS = tileTex.wrapT = THREE.RepeatWrapping;
+  tileTex.magFilter = THREE.NearestFilter;
+  tileTex.repeat.set(LOT_X, STORE_DEPTH / 2);
+  const tiles = new THREE.Mesh(new THREE.PlaneGeometry(LOT_X * 2, STORE_DEPTH).rotateX(-Math.PI / 2), toon({ color: 0x3f6f7c, map: tileTex }));
+  tiles.position.set(0, 0.015, midZ);
+  scene.add(tiles);
+  const ceil = new THREE.Mesh(new THREE.PlaneGeometry(LOT_X * 2, STORE_DEPTH).rotateX(Math.PI / 2), storeMat);
+  ceil.position.set(0, 10.4, midZ);
+  scene.add(ceil);
+
+  // Shelving: a flat band of stock down each side of every unit.
+  const stockC = document.createElement('canvas');
+  stockC.width = 256;
+  stockC.height = 128;
+  const kg = stockC.getContext('2d')!;
+  kg.fillStyle = '#101c24';
+  kg.fillRect(0, 0, 256, 128);
+  const stockColours = ['#e8c547', '#d62f55', '#8fb3d9', '#9bc96b', '#f1e9e0', '#a9714b', '#b7a3b5', '#4f6f96'];
+  let sd = 5;
+  const srand = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  for (let row = 0; row < 4; row++) {
+    for (let x = 4; x < 252;) {
+      const w = 8 + Math.floor(srand() * 18);
+      if (srand() > 0.14) {
+        kg.fillStyle = stockColours[Math.floor(srand() * stockColours.length)];
+        kg.fillRect(x, row * 32 + 6 + srand() * 6, w - 2, 20);
+      }
+      x += w;
+    }
+    kg.fillStyle = '#24323f';
+    kg.fillRect(0, row * 32 + 28, 256, 4);
+  }
+  const stockTex = new THREE.CanvasTexture(stockC);
+  stockTex.wrapS = THREE.RepeatWrapping;
+  stockTex.magFilter = THREE.NearestFilter;
+  stockTex.colorSpace = THREE.SRGBColorSpace;
+  stockTex.repeat.set(5, 1);
+  const stockMat = toon({ color: 0xffffff, map: stockTex });
+  const shelfMat = toon({ color: 0x1b2a36 });
+  const SHELF_Z = backZ + 24, SHELF_HALF = 13;
+  for (let x = -70; x <= 80; x += 10) {
+    solid(x, 1.25, SHELF_Z, 0.7, 1.25, SHELF_HALF, shelfMat, 0.3);
+    for (const side of [1, -1]) {
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(SHELF_HALF * 2 - 0.4, 2.3), stockMat);
+      face.position.set(x + side * 0.71, 1.25, SHELF_Z);
+      face.rotation.y = (side * Math.PI) / 2;
+      scene.add(face);
+    }
+  }
+
+  // Tills along the front, each with a dead screen still glowing faintly.
+  const screenMat = new THREE.MeshBasicMaterial({ color: 0x58ffd0 });
+  for (let x = -50; x <= 70; x += 12) {
+    solid(x, 0.5, storeZ - 11, 0.55, 0.5, 2.3, shelfMat, 0.3);
+    const screen = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.36, 0.06), screenMat);
+    screen.position.set(x, 1.3, storeZ - 9.2);
+    scene.add(screen);
+  }
+
+  // The fridge wall along the back: the only real light in here.
+  const fridge = new THREE.Mesh(new THREE.BoxGeometry(LOT_X * 2 - 8, 2.6, 0.5), new THREE.MeshBasicMaterial({ color: 0x9fe8ff }));
+  fridge.position.set(0, 1.4, backZ + 0.4);
+  scene.add(fridge);
+  for (let x = -LOT_X + 8; x < LOT_X - 4; x += 3) {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.16, 2.7, 0.56), shelfMat);
+    bar.position.set(x, 1.4, backZ + 0.42);
+    scene.add(bar);
+  }
+  for (const x of [-68, -34, 0, 34, 68]) lights.add({ x, y: 2, z: backZ + 4, color: 0x9fe8ff, intensity: 110, distance: 34, store: true });
+  // A few emergency lamps over the front aisle, and a green exit sign over the way you came in.
+  for (const x of [-60, -20, 20, 60]) lights.add({ x, y: 6, z: storeZ - 14, color: 0xffb880, intensity: 120, distance: 36, store: true });
+  for (const x of [-45, -5, 35, 75]) lights.add({ x, y: 5, z: SHELF_Z, color: 0xbfd8ff, intensity: 60, distance: 28, store: true });
+  const exitSign = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.45, 0.08), new THREE.MeshBasicMaterial({ color: 0x58ffa0 }));
+  exitSign.position.set((DOOR.x0 + DOOR.x1) / 2, DOOR.top + 0.5, storeZ - 1.1);
+  scene.add(exitSign);
+  lights.add({ x: (DOOR.x0 + DOOR.x1) / 2, y: 2.6, z: storeZ - 3, color: 0x58ffa0, intensity: 50, distance: 18, store: true });
+
+  // Display stacks at the aisle ends. They are there to be driven through.
+  const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+  const boxMats = [toon({ color: 0xe8c547 }), toon({ color: 0xd62f55 }), toon({ color: 0x8fb3d9 })];
+  const display = (cx: number, cz: number) => {
+    const spots: [number, number, number][] = [[-0.55, 0, 0], [0, 0, 0], [0.55, 0, 0], [-0.28, 1, 0], [0.28, 1, 0], [0, 2, 0], [-0.28, 0, 0.55], [0.28, 0, 0.55]];
+    spots.forEach(([dx, level, dz], i) => {
+      const home = new THREE.Vector3(cx + dx, 0.25 + level * 0.5, cz + dz);
+      const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(home.x, home.y, home.z).setLinearDamping(0.4).setAngularDamping(0.6));
+      world.createCollider(RAPIER.ColliderDesc.cuboid(0.25, 0.25, 0.25).setMass(1.2).setFriction(0.6).setRestitution(0.2), body);
+      const mesh = new THREE.Mesh(boxGeo, boxMats[(i + Math.abs(Math.round(cx))) % 3]);
+      mesh.position.copy(home);
+      scene.add(mesh);
+      cones.push({ body, mesh, tipped: false, home, label: 'DISPLAY', points: 30 });
+    });
+  };
+  for (const x of [-65, -35, -5, 25, 55]) display(x, SHELF_Z + SHELF_HALF + 3.5);
+  for (const [x, z] of [[-40, storeZ - 20], [10, storeZ - 6], [50, storeZ - 22], [-76, backZ + 6]]) cone(x, 0, z);
   const windows = new THREE.Mesh(
     new THREE.PlaneGeometry(96, 3.2),
     toon({ color: 0x0c1016, emissive: 0xbcd6ff, emissiveIntensity: 0.9 }),
@@ -555,6 +691,8 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   graffiti(scene, 'ZOOM', PINK, 66, 2.6, front, 0, 8);
   graffiti(scene, 'NO CARTS', BONE, -78, 5.6, front, 0, 10);
   graffiti(scene, 'SLUDGE', SLIME, 78, 6.2, front, 0, 9);
+  graffiti(scene, 'SHHH', BONE, 30, 3.2, storeZ - 1.06, Math.PI, 8);
+  graffiti(scene, 'AISLE 9', PINK, LOT_X - 0.06, 3, storeZ - 30, -Math.PI / 2, 8);
   // Underground: the walls are covered.
   graffiti(scene, 'RATS', PINK, GARAGE.x0 + 0.02, G + 2.2, -12, Math.PI / 2, 7);
   graffiti(scene, 'CART KIDS', MUSTARD, GARAGE.x0 + 0.02, G + 2.3, 16, Math.PI / 2, 9);
@@ -595,7 +733,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
 
   const pickupSpots = [
     P(0, 0, 25), P(-49.5, 1.1, 30), P(-54, 3.0, 58), P(54, G, 5), P(40, G, -14), P(74, G, 22),
-    P(30, 0, -76), P(54, 0, 74), P(-47, 0, -36), P(0, 0, -55), P(76, 0, 80), P(-80, 0, -70), P(26, 0, 83),
+    P(30, 0, -76), P(54, 0, 74), P(-47, 0, -36), P(0, 0, -55), P(76, 0, 80), P(-80, 0, -70), P(0, 0, -147), P(64, 0, -103), P(-25, 0, -128), P(26, 0, 83),
   ];
   const hangouts = [
     { x: 9.5, z: 57, yaw: -1.9 }, { x: 10.8, z: 58.6, yaw: -2.4 },
@@ -614,7 +752,7 @@ export function buildParkingLot(scene: THREE.Scene, world: RAPIER.World, lights:
   return {
     kerbHandles,
     spawn: { x: 0, z: 66, yaw: Math.PI },
-    bounds: { x: LOT_X, z: LOT_Z },
+    bounds: { x: LOT_X, z: LOT_Z, north: LOT_Z + STORE_DEPTH },
     circuit,
     hangouts,
     pickupSpots,

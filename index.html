@@ -46,7 +46,11 @@
       #touch { position: fixed; inset: 0; display: none; pointer-events: none; touch-action: none; }
       #touch.on { display: block; }
       #touch > * { position: absolute; pointer-events: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
-      #stick { left: 0; bottom: 0; width: 45%; height: 55%; }
+      #stick { left: 26px; bottom: 22px; width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center;
+        border: 2px solid rgba(232, 197, 71, 0.55); background: rgba(14, 24, 32, 0.4); }
+      #stick::before { content: ''; position: absolute; inset: -34px; }
+      #stick-knob { width: 58px; height: 58px; border-radius: 50%; background: rgba(232, 197, 71, 0.85); border: 2px solid #3a2a10;
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.45); pointer-events: none; }
       .tbtn { display: grid; place-items: center; border-radius: 50%; border: 2px solid rgba(255, 152, 56, 0.7);
         background: rgba(20, 14, 8, 0.45); color: #ffb469; font-weight: 800; font-size: 14px; }
       #btn-push { right: 22px; bottom: 26px; width: 92px; height: 92px; }
@@ -61,7 +65,7 @@
   <body>
     <div id="app"></div>
     <div id="touch">
-      <div id="stick"></div>
+      <div id="stick"><div id="stick-knob"></div></div>
       <div id="btn-push" class="tbtn">PUSH</div>
       <div id="btn-hop" class="tbtn">HOP</div>
       <div id="btn-reset" class="tbtn">↺</div>

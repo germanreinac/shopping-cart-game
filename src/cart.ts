@@ -43,6 +43,7 @@ export const TUNE = {
   turnRateFast: 1.35, // rad/s of turning at top speed
   turnSnap: 12, // how quickly the cart reaches the turn rate you asked for
   grip: 11, // how fast sideways sliding is killed (per second); lower = looser
+  slickGrip: 0.42, // grip multiplier on the supermarket's polished floor
   turnDrag: 1.5, // m/s² lost in a hard corner
   revertRate: 5, // rad/s the cart swings round when it is rolling backwards
   driftMinSpeed: 8, // need this much speed to start a drift
@@ -208,6 +209,8 @@ export class Cart {
   drifting = false;
   /** True while the player has hold of this cart. Otherwise it rolls on its own. */
   occupied = false;
+  /** Polished floor under the wheels: much less grip, so everything slides. */
+  slick = false;
   /** Rails this cart can grind. */
   rails: Rail[] = [];
   /** Set while sliding along a rail. */
@@ -256,7 +259,7 @@ export class Cart {
     scene: THREE.Scene,
     spawn: { x: number; z: number; yaw: number },
     private kerbs: Set<number>,
-    private bounds: { x: number; z: number },
+    private bounds: { x: number; z: number; north?: number },
     accent = 0xd8342c,
   ) {
     this.spawnPose = spawn;
@@ -427,7 +430,8 @@ export class Cart {
         const vl = vel.x * lx + vel.z * lz;
         const sp = Math.hypot(vf, vl);
         if (sp > 0.05) {
-          const nl = vl * Math.max(0, 1 - (this.drifting ? TUNE.driftGrip : TUNE.grip) * dt);
+          const grip = (this.drifting ? TUNE.driftGrip : TUNE.grip) * (this.slick ? TUNE.slickGrip : 1);
+          const nl = vl * Math.max(0, 1 - grip * dt);
           const scrub = (this.drifting ? TUNE.driftDrag : TUNE.turnDrag) * Math.min(1, Math.abs(vl) / sp) * dt;
           const keep = Math.max(0, sp - scrub);
           const nf = (vf < 0 ? -1 : 1) * Math.sqrt(Math.max(0, keep * keep - nl * nl));
@@ -634,7 +638,7 @@ export class Cart {
     const t = this.body.translation();
     // Step back from the perimeter so you are not stood up inside a wall.
     const x = Math.max(-this.bounds.x + 3, Math.min(this.bounds.x - 3, t.x));
-    const z = Math.max(-this.bounds.z + 3, Math.min(this.bounds.z - 3, t.z));
+    const z = Math.max(-(this.bounds.north ?? this.bounds.z) + 3, Math.min(this.bounds.z - 3, t.z));
     const floor = groundBelow(this.world, x, t.y + 1.5, z, 8);
     if (floor !== null && this.state === 'crashed') {
       // If that would leave you nose-first against a wall, face the other way.

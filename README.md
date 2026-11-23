@@ -18,9 +18,9 @@ Then open the link Vite prints.
 | Action | Keyboard | Gamepad | Touch |
 | --- | --- | --- | --- |
 | Go: run, then ride and kick along | hold `W` / `↑` | `RT` or `X` | PUSH |
-| Steer / drift / spin in the air | `A` `D` / `←` `→` | left stick | drag left side |
+| Steer / drift / spin in the air | `A` `D` / `←` `→` | left stick | on-screen stick, bottom left |
 | Jump | `Space` | `A` | HOP |
-| Wheelie on the ground, backflip in the air | `S` / `↓` | stick back | drag down |
+| Wheelie on the ground, backflip in the air | `S` / `↓` | stick back | stick down |
 | Let go of the cart | `Q` | `LB` | LET GO |
 | Passenger throws a can | `F` | `B` or `RB` | THROW |
 | Start or abandon a race | `Enter`, or roll into the green ring | Start | RACE |
@@ -40,6 +40,8 @@ Hold go and the character runs with the cart, jumps on by themselves once it is 
 - **Switch carts:** on foot, run up behind any loose trolley to grab it. Spare trolleys sit around the lot. Pull up beside the cart your passenger ended up in and they climb across.
 - **Trench gap:** two big kickers face each other across the underground exit ramp. Clear the cutting in one jump for a bonus.
 - **Banked corner:** a ring of wedges in the south-west corner you can carve round.
+- **The supermarket** is closed, but there is a way in: a staff door left ajar at the far west end of the shop front, by the phone box and under the NO CARTS tag. Inside are long aisles, dead tills, a wall of fridges, displays to drive through and a polished floor with far less grip.
+- **On foot** you just point the stick (or `W A S D`) where you want to go; there is nothing to hold.
 - **Kerb hop:** jump onto or off a kerb island for a bonus.
 - **Crew:** teens hang around the lot. Roll past one slowly and they hop in the basket, then throw cans at rival riders (slows them down) and traffic cones.
 - **Race:** roll into the green RACE ring by the start (or press `Enter`) for two laps against four other kids. Chevrons on the ground mark the racing line and an arrow at the top of the screen points where it goes next, turning yellow for sharp corners. Miss a turn and after a few seconds you are put back on the line. Barge into a kid to knock them off line, or have your passenger hit them with a can.

@@ -113,6 +113,7 @@ async function start(): Promise<void> {
   const v = new THREE.Vector3();
   const coneUp = new THREE.Vector3();
   let camReady = false;
+  let beenInside = false;
   let camY = 0;
   let gapFrom: number | null = null;
 
@@ -224,6 +225,15 @@ async function start(): Promise<void> {
     }
     const ctl = race.locked ? NO_CONTROLS : raw;
     const crashed = carts.map((c) => c.state === 'crashed');
+    // Inside the shop the floor is polished: everything slides.
+    const indoors = player.position.z < -lot.bounds.z - 1 && player.position.y > -1;
+    for (const c of carts) c.slick = c.body.translation().z < -lot.bounds.z - 1;
+    if (indoors && !beenInside) {
+      beenInside = true;
+      hud.popup('Closed. Obviously.', 'info');
+      award('SECRET', 500);
+    }
+    player.viewYaw = Math.atan2(heading.x, heading.z);
     player.step(ctl);
     for (const c of carts) c.step(c === player.cart ? ctl : NO_CONTROLS);
     crew.step(player.cart, ctl.throw, race.targets.concat(coneTargets()));
@@ -348,9 +358,10 @@ async function start(): Promise<void> {
     for (const cone of lot.cones) {
       if (cone.tipped) continue;
       coneUp.set(0, 1, 0).applyQuaternion(cone.mesh.quaternion);
-      if (coneUp.y < 0.5) {
+      const knocked = cone.home ? cone.mesh.position.distanceTo(cone.home) > 0.6 : coneUp.y < 0.5;
+      if (knocked) {
         cone.tipped = true;
-        award('CONE', 50);
+        award(cone.label ?? 'CONE', cone.points ?? 50);
       }
     }
 

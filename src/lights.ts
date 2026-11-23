@@ -9,6 +9,8 @@ export interface LightSite {
   distance: number;
   /** Underground lights only shine when the camera is below the surface, and vice versa. */
   underground?: boolean;
+  /** Lights inside the supermarket: only on while the camera is in there, when everything else is off. */
+  store?: boolean;
 }
 
 const smooth = (a: number, b: number, v: number) => {
@@ -24,6 +26,8 @@ const smooth = (a: number, b: number, v: number) => {
 export class LightPool {
   private sites: (LightSite & { score: number; gain: number })[] = [];
   private lights: THREE.PointLight[] = [];
+  /** The z of the shop front; beyond it (more negative) is indoors. Null until there is a shop. */
+  storeZ: number | null = null;
 
   constructor(scene: THREE.Scene, size = 10) {
     for (let i = 0; i < size; i++) {
@@ -39,9 +43,10 @@ export class LightPool {
 
   update(camera: THREE.Vector3): void {
     const below = smooth(-0.8, -3.2, camera.y);
+    const inside = this.storeZ === null ? 0 : (1 - below) * smooth(this.storeZ + 2, this.storeZ - 4, camera.z);
     for (const s of this.sites) {
       const d = Math.hypot(s.x - camera.x, s.y - camera.y, s.z - camera.z);
-      const zone = s.underground ? below : 1 - below;
+      const zone = s.underground ? below : s.store ? inside : (1 - below) * (1 - inside);
       s.gain = zone * (1 - smooth(40, 58, d));
       s.score = s.gain > 0 ? d : Infinity;
     }

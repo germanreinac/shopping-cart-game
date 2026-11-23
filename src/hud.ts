@@ -90,7 +90,7 @@ export class Hud {
     }
 
     let hint: string;
-    if (h.onFoot) hint = 'On foot: <b>W</b> run · <b>A / D</b> turn · run up behind any cart to grab it';
+    if (h.onFoot) hint = 'On foot: <b>W A S D</b> or the stick to walk · run up behind any cart to grab it';
     else if (h.state === 'crashed') hint = 'Ouch';
     else hint = 'Hold <b>W</b> to go · <b>A / D</b> steer, hold to drift · <b>Space</b> jump · in the air <b>S</b> backflip, <b>A / D</b> spin · <b>Q</b> let go';
     if (h.passenger && h.state !== 'crashed') hint += ` · <b>F</b> ${h.passenger} throws`;

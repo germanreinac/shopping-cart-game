@@ -25,6 +25,8 @@ export class Player {
   yaw = 0;
   /** Running speed while on foot. */
   footSpeed = 0;
+  /** Which way the camera is looking, so stick-up means "away from the camera". Set by the game each frame. */
+  viewYaw = 0;
   events: PlayerEvent[] = [];
 
   private body: RAPIER.RigidBody;
@@ -85,10 +87,22 @@ export class Player {
       return;
     }
 
-    // On foot.
-    this.lean += (ctl.steer - this.lean) * Math.min(1, dt * 10);
-    this.yaw -= this.lean * TURN_RATE * dt;
-    const target = ctl.back > 0.1 ? -2 : ctl.push ? RUN_SPEED : 0;
+    // On foot: just point the stick (or WASD) where you want to go, relative to the camera.
+    const mx = ctl.steer, my = ctl.fwd - ctl.back;
+    const mag = Math.min(1, Math.hypot(mx, my));
+    if (mag > 0.15) {
+      // Camera forward is (sin, cos) of viewYaw; its right-hand side is (-cos, sin).
+      const dx = Math.sin(this.viewYaw) * my - Math.cos(this.viewYaw) * mx;
+      const dz = Math.cos(this.viewYaw) * my + Math.sin(this.viewYaw) * mx;
+      let turn = Math.atan2(dx, dz) - this.yaw;
+      while (turn > Math.PI) turn -= Math.PI * 2;
+      while (turn < -Math.PI) turn += Math.PI * 2;
+      this.yaw += Math.max(-TURN_RATE * 3 * dt, Math.min(TURN_RATE * 3 * dt, turn));
+      this.lean += (Math.max(-1, Math.min(1, -turn * 2)) - this.lean) * Math.min(1, dt * 10);
+    } else {
+      this.lean += -this.lean * Math.min(1, dt * 10);
+    }
+    const target = mag > 0.15 ? RUN_SPEED * mag : 0;
     this.footSpeed += Math.max(-30 * dt, Math.min(22 * dt, target - this.footSpeed));
     this.vy -= 25 * dt;
     this.controller.computeColliderMovement(this.collider, {

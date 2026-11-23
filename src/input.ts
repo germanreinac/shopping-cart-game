@@ -6,6 +6,8 @@ export interface Controls {
   steer: number;
   /** 0..1 lean back (wheelie when riding, brake when pushing). */
   back: number;
+  /** 0..1 stick or key pushed forward. On foot this is all you need to run. */
+  fwd: number;
   /** Pressed this step: hop on / jump. */
   jump: boolean;
   /** Jump is being held: hold for a full-height jump, tap for a short one. */
@@ -20,7 +22,7 @@ export interface Controls {
   letGo: boolean;
 }
 
-export const NO_CONTROLS: Controls = { push: false, steer: 0, back: 0, jump: false, jumpHeld: false, reset: false, throw: false, race: false, letGo: false };
+export const NO_CONTROLS: Controls = { push: false, steer: 0, back: 0, fwd: 0, jump: false, jumpHeld: false, reset: false, throw: false, race: false, letGo: false };
 
 const DEADZONE = 0.18;
 
@@ -32,7 +34,7 @@ export class Input {
   private raceQueued = false;
   private letGoQueued = false;
   private padPrev: boolean[] = [];
-  private touch = { push: false, steer: 0, back: 0, jump: false };
+  private touch = { push: false, steer: 0, back: 0, fwd: 0, jump: false };
 
   constructor() {
     window.addEventListener('keydown', (e) => {
@@ -58,18 +60,21 @@ export class Input {
     let back = k.has('KeyS') || k.has('ArrowDown') ? 1 : 0;
     steer += this.touch.steer;
     back = Math.max(back, this.touch.back);
+    let fwd = Math.max(push ? 1 : 0, this.touch.fwd);
 
     const pad = this.readGamepad();
     if (pad) {
       push = push || pad.push;
       steer += pad.steer;
       back = Math.max(back, pad.back);
+      fwd = Math.max(fwd, pad.fwd);
     }
 
     const out: Controls = {
       push,
       steer: Math.max(-1, Math.min(1, steer)),
       back,
+      fwd,
       jump: this.jumpQueued,
       jumpHeld: k.has('Space') || this.touch.jump || (pad?.jump ?? false),
       reset: this.resetQueued,
@@ -86,7 +91,7 @@ export class Input {
   }
 
   /** Standard-mapping gamepad: RT or X = push, stick = steer / lean back, A = hop, B = throw, Y = reset, Start = race. */
-  private readGamepad(): { push: boolean; steer: number; back: number; jump: boolean } | null {
+  private readGamepad(): { push: boolean; steer: number; back: number; fwd: number; jump: boolean } | null {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const pad = Array.from(pads).find((p) => p && p.connected);
     if (!pad) return null;
@@ -103,6 +108,7 @@ export class Input {
     return {
       push: !!pressed[7] || !!pressed[2],
       jump: !!pressed[0],
+      fwd: ay < -0.25 ? -ay : pressed[12] ? 1 : 0,
       steer: Math.abs(ax) > DEADZONE ? ax : (pressed[15] ? 1 : 0) - (pressed[14] ? 1 : 0),
       back: ay > 0.35 ? ay : pressed[13] ? 1 : 0,
     };
@@ -115,28 +121,39 @@ export class Input {
     const show = () => root.classList.add('on');
     window.addEventListener('touchstart', show, { once: true, passive: true });
 
+    // A fixed stick, bottom left: the knob follows your thumb and springs back when you let go.
     const stick = document.getElementById('stick');
-    if (stick) {
+    const knob = document.getElementById('stick-knob');
+    if (stick && knob) {
+      const REACH = 46;
       let id = -1;
-      let ox = 0;
-      let oy = 0;
+      const set = (dx: number, dy: number) => {
+        const len = Math.hypot(dx, dy);
+        const k = len > REACH ? REACH / len : 1;
+        dx *= k;
+        dy *= k;
+        knob.style.transform = `translate(${dx}px, ${dy}px)`;
+        const dead = (v: number) => (Math.abs(v) < 0.14 ? 0 : v);
+        this.touch.steer = dead(dx / REACH);
+        this.touch.back = Math.max(0, dead(dy / REACH));
+        this.touch.fwd = Math.max(0, dead(-dy / REACH));
+      };
+      const move = (e: PointerEvent) => {
+        if (e.pointerId !== id) return;
+        const r = stick.getBoundingClientRect();
+        set(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+      };
       const end = (e: PointerEvent) => {
         if (e.pointerId !== id) return;
         id = -1;
-        this.touch.steer = 0;
-        this.touch.back = 0;
+        set(0, 0);
       };
       stick.addEventListener('pointerdown', (e) => {
         id = e.pointerId;
-        ox = e.clientX;
-        oy = e.clientY;
         stick.setPointerCapture(id);
+        move(e);
       });
-      stick.addEventListener('pointermove', (e) => {
-        if (e.pointerId !== id) return;
-        this.touch.steer = Math.max(-1, Math.min(1, (e.clientX - ox) / 50));
-        this.touch.back = Math.max(0, Math.min(1, (e.clientY - oy) / 45));
-      });
+      stick.addEventListener('pointermove', move);
       stick.addEventListener('pointerup', end);
       stick.addEventListener('pointercancel', end);
     }
